@@ -17,6 +17,11 @@
 package com.eltavine.duckdetector.features.dashboard.ui
 
 import android.content.ClipData
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.view.View
+import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -24,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material.icons.rounded.Badge
 import androidx.compose.material.icons.rounded.FileDownload
+import androidx.compose.material.icons.rounded.PhotoCamera
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -50,11 +56,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalUriHandler
@@ -72,6 +81,7 @@ import com.eltavine.duckdetector.features.bootloader.ui.card.BootloaderDetectorC
 import com.eltavine.duckdetector.features.customrom.ui.card.CustomRomDetectorCard
 import com.eltavine.duckdetector.features.dangerousapps.ui.card.DangerousAppsDetectorCard
 import com.eltavine.duckdetector.features.dashboard.data.DashboardExportFormatter
+import com.eltavine.duckdetector.features.dashboard.data.DashboardScreenshotCapture
 import com.eltavine.duckdetector.features.dashboard.ui.model.DashboardDetectorCardEntry
 import com.eltavine.duckdetector.features.dashboard.ui.model.DashboardFindingModel
 import com.eltavine.duckdetector.features.dashboard.ui.model.DashboardOverviewMetricModel
@@ -91,6 +101,7 @@ import com.eltavine.duckdetector.features.tee.ui.card.TeeDetectorCard
 import com.eltavine.duckdetector.features.tee.ui.model.TeeFooterActionId
 import com.eltavine.duckdetector.features.virtualization.ui.card.VirtualizationDetectorCard
 import com.eltavine.duckdetector.features.zygisk.ui.card.ZygiskDetectorCard
+import com.eltavine.duckdetector.ui.theme.DuckDetectorTheme
 import com.eltavine.duckdetector.ui.theme.ShapeTokens
 
 private const val DUCK_DETECTOR_QQ_GROUP = "1079283524"
@@ -134,6 +145,57 @@ fun DashboardScreen(
         }
     }
 
+    val currentView = LocalView.current
+    val screenshotCapture = remember {
+        DashboardScreenshotCapture(context, currentView)
+    }
+    val screenshotExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("image/png"),
+    ) { uri ->
+        if (uri != null) {
+            screenshotCapture.capture(
+                content = {
+                    DuckDetectorTheme {
+                        FullDashboardColumn(
+                        uiState = uiState,
+                        showTeeDetailsDialog = showTeeDetailsDialog,
+                        showTeeCertificatesDialog = showTeeCertificatesDialog,
+                        onTeeFooterAction = onTeeFooterAction,
+                        onDismissTeeDetails = onDismissTeeDetails,
+                        onDismissTeeCertificates = onDismissTeeCertificates,
+                    )
+                    }
+                },
+            ) { bitmap ->
+                if (bitmap != null) {
+                    try {
+                        context.contentResolver.openOutputStream(uri)?.use { stream ->
+                            bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+                        }
+                        bitmap.recycle()
+                        Toast.makeText(
+                            context,
+                            "Screenshot saved",
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    } catch (e: Exception) {
+                        Toast.makeText(
+                            context,
+                            "Screenshot failed: ${e.message}",
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                } else {
+                    Toast.makeText(
+                        context,
+                        "Screenshot render timed out",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            }
+        }
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -154,11 +216,23 @@ fun DashboardScreen(
         ) {
             item { BrandHeader() }
             item {
-                ExportButton(
-                    onClick = {
-                        exportLauncher.launch("duck_detector_report.md")
-                    },
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    ExportButton(
+                        onClick = {
+                            exportLauncher.launch("duck_detector_report.md")
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                    ScreenshotExportButton(
+                        onClick = {
+                            screenshotExportLauncher.launch("duck_detector_screenshot.png")
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
             item {
                 DashboardSummarySection(
@@ -396,10 +470,11 @@ private fun BrandHeader() {
 @Composable
 private fun ExportButton(
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     FilledTonalButton(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier,
     ) {
         Icon(
             imageVector = Icons.Rounded.FileDownload,
@@ -409,6 +484,28 @@ private fun ExportButton(
         Spacer(modifier = Modifier.size(8.dp))
         WrapSafeText(
             text = "Export Report",
+            style = MaterialTheme.typography.labelLarge,
+        )
+    }
+}
+
+@Composable
+private fun ScreenshotExportButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    FilledTonalButton(
+        onClick = onClick,
+        modifier = modifier,
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.PhotoCamera,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(modifier = Modifier.size(8.dp))
+        WrapSafeText(
+            text = "Screenshot",
             style = MaterialTheme.typography.labelLarge,
         )
     }
@@ -834,5 +931,101 @@ private fun findingSeverityLabel(
         DetectionSeverity.WARNING -> "Warn"
         DetectionSeverity.INFO -> "Check"
         DetectionSeverity.ALL_CLEAR -> "Clear"
+    }
+}
+
+@Composable
+private fun FullDashboardColumn(
+    uiState: DashboardUiState,
+    showTeeDetailsDialog: Boolean,
+    showTeeCertificatesDialog: Boolean,
+    onTeeFooterAction: (TeeFooterActionId) -> Unit,
+    onDismissTeeDetails: () -> Unit,
+    onDismissTeeCertificates: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        BrandHeader()
+        DashboardSummarySection(
+            overview = uiState.overview,
+            findings = uiState.topFindings,
+            showLoadingOverlay = false,
+        )
+        uiState.detectorCards.forEach { entry ->
+            when (entry) {
+                is DashboardDetectorCardEntry.Bootloader -> {
+                    BootloaderDetectorCard(model = entry.model)
+                }
+
+                is DashboardDetectorCardEntry.Mount -> {
+                    MountDetectorCard(model = entry.model)
+                }
+
+                is DashboardDetectorCardEntry.CustomRom -> {
+                    CustomRomDetectorCard(model = entry.model)
+                }
+
+                is DashboardDetectorCardEntry.Selinux -> {
+                    SelinuxDetectorCard(model = entry.model)
+                }
+
+                is DashboardDetectorCardEntry.DangerousApps -> {
+                    DangerousAppsDetectorCard(model = entry.model)
+                }
+
+                is DashboardDetectorCardEntry.KernelCheck -> {
+                    KernelCheckDetectorCard(model = entry.model)
+                }
+
+                is DashboardDetectorCardEntry.Memory -> {
+                    MemoryDetectorCard(model = entry.model)
+                }
+
+                is DashboardDetectorCardEntry.LSPosed -> {
+                    LSPosedDetectorCard(model = entry.model)
+                }
+
+                is DashboardDetectorCardEntry.NativeRoot -> {
+                    NativeRootDetectorCard(model = entry.model)
+                }
+
+                is DashboardDetectorCardEntry.PlayIntegrityFix -> {
+                    PlayIntegrityFixDetectorCard(model = entry.model)
+                }
+
+                is DashboardDetectorCardEntry.Tee -> {
+                    TeeDetectorCard(
+                        model = entry.model,
+                        showDetailsDialog = showTeeDetailsDialog,
+                        showCertificatesDialog = showTeeCertificatesDialog,
+                        onExpandedChange = {},
+                        onFooterAction = onTeeFooterAction,
+                        onDismissDetails = onDismissTeeDetails,
+                        onDismissCertificates = onDismissTeeCertificates,
+                    )
+                }
+
+                is DashboardDetectorCardEntry.Su -> {
+                    SuDetectorCard(model = entry.model)
+                }
+
+                is DashboardDetectorCardEntry.SystemProperties -> {
+                    SystemPropertiesDetectorCard(model = entry.model)
+                }
+
+                is DashboardDetectorCardEntry.Virtualization -> {
+                    VirtualizationDetectorCard(model = entry.model)
+                }
+
+                is DashboardDetectorCardEntry.Zygisk -> {
+                    ZygiskDetectorCard(model = entry.model)
+                }
+            }
+        }
+        DeviceInfoCard(model = uiState.deviceInfoCard)
     }
 }
