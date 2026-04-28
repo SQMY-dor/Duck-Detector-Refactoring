@@ -156,7 +156,7 @@ fun DashboardScreen(
             item {
                 ExportButton(
                     onClick = {
-                        exportLauncher.launch("duck_detector_report.txt")
+                        exportLauncher.launch("duck_detector_report.md")
                     },
                 )
             }
