@@ -85,7 +85,7 @@ import compose.icons.simpleicons.Tencentqq
 import com.eltavine.duckdetector.BuildConfig
 import com.eltavine.duckdetector.core.ui.model.DetectionSeverity
 import com.eltavine.duckdetector.R
-import com.eltavine.duckdetector.core.ui.components.DeviceInfoWatermark
+import com.eltavine.duckdetector.core.ui.components.DigitalWatermark
 import com.eltavine.duckdetector.core.ui.components.WrapSafeText
 import com.eltavine.duckdetector.core.ui.presentation.formatBuildTimeUtc
 import com.eltavine.duckdetector.core.ui.presentation.rememberStatusAppearance
@@ -367,8 +367,8 @@ fun DashboardScreen(
             )
         }
 
-        // Device identity watermark — subtle, fixed, non-interactive
-        DeviceInfoWatermark(deviceInfoCard = uiState.deviceInfoCard)
+        // Invisible digital watermark — embeds device identity in pixel data
+        DigitalWatermark(deviceInfoCard = uiState.deviceInfoCard)
     }
 }
 
