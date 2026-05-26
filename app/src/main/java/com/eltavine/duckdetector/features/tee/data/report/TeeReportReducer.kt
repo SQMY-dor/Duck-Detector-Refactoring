@@ -224,7 +224,7 @@ class TeeReportReducer(
                 add(
                     fact(
                         "Revocation",
-                        "Official revocation feed matched certificate serials from the chain.",
+                        "Revocation data matched certificate serials from the chain.",
                         TeeSignalLevel.FAIL
                     )
                 )
@@ -305,6 +305,19 @@ class TeeReportReducer(
                             "Grant isolated-domain key visibility divergence detected. " +
                                 grantDomainFullChainSplitValue(artifacts),
                             TeeSignalLevel.FAIL,
+                            hiddenCopyText = artifacts.grantDomainFullChainSplit.diagnosticCopyText
+                                .takeIf { it.isNotBlank() },
+                        )
+                    )
+                }
+
+                GrantDomainAnomalyKind.ISOLATED_PRIVATE_READBACK_CRASH -> {
+                    add(
+                        fact(
+                            "Grant isolated-domain",
+                            "Grant isolated-domain isolated private readback crashed after grant succeeded. " +
+                                grantDomainFullChainSplitValue(artifacts),
+                            TeeSignalLevel.WARN,
                             hiddenCopyText = artifacts.grantDomainFullChainSplit.diagnosticCopyText
                                 .takeIf { it.isNotBlank() },
                         )
@@ -1351,15 +1364,16 @@ class TeeReportReducer(
         val network = artifacts.crl.networkState
         val sourceLabel = when {
             network.mode == TeeNetworkMode.ACTIVE -> "Online"
-            network.mode == TeeNetworkMode.CONSENT_REQUIRED -> "Consent required"
-            network.mode == TeeNetworkMode.SKIPPED -> "Disabled in Settings"
-            network.mode == TeeNetworkMode.ERROR -> "Refresh failed"
-            network.mode == TeeNetworkMode.INACTIVE -> "Offline only"
-            else -> "Offline only"
+            network.mode == TeeNetworkMode.CONSENT_REQUIRED -> "Built-in snapshot"
+            network.mode == TeeNetworkMode.SKIPPED -> "Built-in snapshot"
+            network.mode == TeeNetworkMode.ERROR && network.usedCache -> "Built-in snapshot"
+            network.mode == TeeNetworkMode.ERROR -> "Unavailable"
+            network.mode == TeeNetworkMode.INACTIVE -> "Built-in snapshot"
+            else -> "Built-in snapshot"
         }
         return buildString {
             append(sourceLabel)
-            if (network.mode == TeeNetworkMode.ACTIVE) {
+            if (network.mode == TeeNetworkMode.ACTIVE || network.usedCache) {
                 append(" • ")
                 append(
                     if (artifacts.crl.revokedCertificates.isEmpty()) {
@@ -1928,6 +1942,7 @@ class TeeReportReducer(
             result.anomalyKind == GrantDomainAnomalyKind.ISOLATED_CHAIN_SPLIT -> TeeSignalLevel.FAIL
             result.anomalyKind == GrantDomainAnomalyKind.ISOLATED_GRANT_KEY_NOT_FOUND_AFTER_OWNER_CHAIN ->
                 TeeSignalLevel.FAIL
+            result.anomalyKind == GrantDomainAnomalyKind.ISOLATED_PRIVATE_READBACK_CRASH -> TeeSignalLevel.WARN
 
             result.executed && result.splitDetected -> TeeSignalLevel.FAIL
             result.executed && result.available -> TeeSignalLevel.PASS
@@ -2167,8 +2182,9 @@ class TeeReportReducer(
     private fun crlSignalValue(artifacts: TeeScanArtifacts): String = when {
         artifacts.crl.revokedCertificates.isNotEmpty() -> "Revoked"
         artifacts.crl.networkState.mode == TeeNetworkMode.ACTIVE -> "Online"
-        artifacts.crl.networkState.mode == TeeNetworkMode.CONSENT_REQUIRED -> "Consent"
-        artifacts.crl.networkState.mode == TeeNetworkMode.SKIPPED -> "Disabled"
+        artifacts.crl.networkState.mode == TeeNetworkMode.CONSENT_REQUIRED -> "Built-in"
+        artifacts.crl.networkState.mode == TeeNetworkMode.SKIPPED -> "Built-in"
+        artifacts.crl.networkState.mode == TeeNetworkMode.ERROR && artifacts.crl.networkState.usedCache -> "Built-in"
         artifacts.crl.networkState.mode == TeeNetworkMode.ERROR -> "Error"
         else -> "Offline"
     }

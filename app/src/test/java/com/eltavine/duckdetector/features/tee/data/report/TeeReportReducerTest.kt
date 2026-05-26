@@ -362,6 +362,41 @@ class TeeReportReducerTest {
     }
 
     @Test
+    fun `grant isolated-domain private readback crash becomes warning supplementary review`() {
+        val report = reducer.reduce(
+            baseArtifacts(
+                grantDomainFullChainSplit = GrantDomainFullChainSplitResult(
+                    executed = true,
+                    available = false,
+                    ownerChainLength = 3,
+                    granteeUid = 99001,
+                    anomalyKind = GrantDomainAnomalyKind.ISOLATED_PRIVATE_READBACK_CRASH,
+                    detail = "Private: isolated readback crashed after grant succeeded.",
+                    diagnosticCopyText = """
+                        java.lang.reflect.InvocationTargetException
+                        Caused by: android.os.ServiceSpecificException: system/security/keystore2/src/service.rs:157: while trying to load key info.
+
+                        Caused by:
+                            0: No legacy keys for key descriptor.
+                            1: Error::Rc(r#KEY_NOT_FOUND) (code 7)
+                    """.trimIndent(),
+                ),
+            ),
+        )
+
+        assertEquals(TeeVerdict.CONSISTENT, report.verdict)
+        assertEquals(1, report.supplementaryIndicatorCount)
+        assertEquals(TeeSignalLevel.WARN, report.supplementaryReviewLevel)
+        assertTrue(report.summary.contains("Grant isolated-domain", ignoreCase = true))
+        assertTrue(report.sections.single { it.title == "Checks" }.items.any {
+            it.title == "Grant isolated-domain" &&
+                it.level == TeeSignalLevel.WARN &&
+                it.body.contains("isolated readback crashed", ignoreCase = true) &&
+                it.hiddenCopyText?.contains("No legacy keys for key descriptor") == true
+        })
+    }
+
+    @Test
     fun `grant isolated-domain unavailable state stays informational`() {
         val report = reducer.reduce(
             baseArtifacts(
@@ -1703,20 +1738,22 @@ class TeeReportReducerTest {
     }
 
     @Test
-    fun `disabled crl state uses settings wording`() {
+    fun `disabled online crl refresh still reports built in snapshot`() {
         val report = reducer.reduce(
             baseArtifacts(
                 networkState = TeeNetworkState(
                     mode = TeeNetworkMode.SKIPPED,
-                    summary = "Online CRL disabled in Settings.",
+                    summary = "Built-in revocation snapshot is active; online refresh is disabled in Settings.",
+                    cacheEntries = 1,
+                    usedCache = true,
                 ),
             ),
         )
 
         assertTrue(report.sections.single { it.title == "Trust" }.items.any {
-            it.title == "CRL" && it.body.contains("Disabled in Settings")
+            it.title == "CRL" && it.body.contains("Built-in snapshot")
         })
-        assertTrue(report.signals.any { it.label == "CRL" && it.value == "Disabled" })
+        assertTrue(report.signals.any { it.label == "CRL" && it.value == "Built-in" })
     }
 
     @Test
@@ -1725,18 +1762,21 @@ class TeeReportReducerTest {
             baseArtifacts(
                 networkState = TeeNetworkState(
                     mode = TeeNetworkMode.ERROR,
-                    summary = "CRL refresh timed out.",
+                    summary = "Online CRL refresh failed; built-in revocation snapshot was used.",
                     detail = "CRL refresh timed out.",
+                    cacheEntries = 1,
+                    usedCache = true,
+                    usingCacheFallback = true,
                 ),
             ),
         )
 
         assertTrue(report.sections.single { it.title == "Trust" }.items.any {
             it.title == "CRL" &&
-                    it.body.contains("Refresh failed") &&
+                    it.body.contains("Built-in snapshot") &&
                     it.body.contains("timed out")
         })
-        assertTrue(report.signals.any { it.label == "CRL" && it.value == "Error" && it.level == TeeSignalLevel.WARN })
+        assertTrue(report.signals.any { it.label == "CRL" && it.value == "Built-in" && it.level == TeeSignalLevel.WARN })
     }
 
     @Test

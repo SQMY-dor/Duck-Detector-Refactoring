@@ -171,6 +171,10 @@ class LSPosedLogcatProbe(
                 }
             }
 
+            if (line.isSelinuxAvcLine()) {
+                return@forEach
+            }
+
             val lowerLine = line.lowercase()
             if (
                 lowerLine.contains("lsposed") ||
@@ -260,7 +264,31 @@ class LSPosedLogcatProbe(
         line: String,
     ): Boolean {
         val lower = line.lowercase()
+        if (SELINUX_AUDIT_MARKER in lower) {
+            return true
+        }
+        if (line.isDirtyPolicyLsposedFileAvc()) {
+            return true
+        }
         return LSPosedProbeSupport.runtimeExcludePatterns.any { token -> lower.contains(token) }
+    }
+
+    private fun String.isDirtyPolicyLsposedFileAvc(): Boolean {
+        val lower = lowercase()
+        return "avc:" in lower &&
+                "denied" in lower &&
+                "scontext=u:r:untrusted_app" in lower &&
+                "tcontext=u:object_r:lsposed_file:s0" in lower &&
+                "tclass=file" in lower &&
+                DIRTY_POLICY_LSPOSED_FILE_READ_REGEX.containsMatchIn(this)
+    }
+
+    private fun String.isSelinuxAvcLine(): Boolean {
+        val lower = lowercase()
+        return "avc:" in lower &&
+                "denied" in lower &&
+                "scontext=" in lower &&
+                "tcontext=" in lower
     }
 
     private fun String.matchesPattern(
@@ -320,6 +348,9 @@ class LSPosedLogcatProbe(
         private const val OVERVIEW_COMMAND_ID = "overview"
         private const val PROCESS_COMMAND_ID = "process"
         private const val TAG_COMMAND_PREFIX = "tag:"
+        private const val SELINUX_AUDIT_MARKER = "duckdetector_probe="
+        private val DIRTY_POLICY_LSPOSED_FILE_READ_REGEX =
+            Regex("""avc:\s*denied\s*\{\s*read\s*\}""", RegexOption.IGNORE_CASE)
 
         private val COMMANDS = buildList {
             add(
