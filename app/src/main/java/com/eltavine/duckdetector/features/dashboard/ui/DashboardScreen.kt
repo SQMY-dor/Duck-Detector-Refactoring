@@ -40,7 +40,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
+
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -63,7 +63,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -86,7 +85,7 @@ import compose.icons.simpleicons.Tencentqq
 import com.eltavine.duckdetector.BuildConfig
 import com.eltavine.duckdetector.core.ui.model.DetectionSeverity
 import com.eltavine.duckdetector.R
-import com.eltavine.duckdetector.core.ui.components.QrBlindWatermark
+import com.eltavine.duckdetector.core.ui.components.DeviceInfoWatermark
 import com.eltavine.duckdetector.core.ui.components.WrapSafeText
 import com.eltavine.duckdetector.core.ui.presentation.formatBuildTimeUtc
 import com.eltavine.duckdetector.core.ui.presentation.rememberStatusAppearance
@@ -228,15 +227,12 @@ fun DashboardScreen(
         CrashHandler.markLaunchCompleted(context)
     }
 
-    val lazyListState = rememberLazyListState()
-
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
     ) {
         LazyColumn(
-            state = lazyListState,
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
@@ -371,20 +367,8 @@ fun DashboardScreen(
             )
         }
 
-        // Blind watermark — QR code overlaid at very low opacity (floating, follows scroll)
-        val scrollOffsetPx by remember(lazyListState) {
-            derivedStateOf {
-                lazyListState.layoutInfo.visibleItemsInfo
-                    .firstOrNull()
-                    ?.offset
-                    ?.toFloat()
-                    ?: 0f
-            }
-        }
-        QrBlindWatermark(
-            deviceInfoCard = uiState.deviceInfoCard,
-            scrollOffsetPx = scrollOffsetPx,
-        )
+        // Device identity watermark — subtle, fixed, non-interactive
+        DeviceInfoWatermark(deviceInfoCard = uiState.deviceInfoCard)
     }
 }
 
