@@ -36,7 +36,7 @@ import kotlin.math.abs
 /**
  * Invisible spread-spectrum digital watermark — JPEG & PNG compatible.
  *
- * Embeds a compact device-identity payload by adding +5 to the blue
+ * Embeds a compact device-identity payload by adding +15 to the blue
  * channel of non-overlapping 8×8 pixel blocks.  The 8×8 grid aligns
  * with JPEG's DCT block structure, so the modification becomes a DC
  * offset that survives lossy compression.
@@ -91,7 +91,7 @@ private const val MAX_SAMPLES_PER_BIT = 8
 private const val BLOCK_SIZE = 8
 
 /** Blue-channel delta per pixel in watermarked blocks. */
-private const val WATERMARK_DELTA = 5
+private const val WATERMARK_DELTA = 15
 
 /** ARGB pixel value: A=0, R=0, G=0, B=WATERMARK_DELTA. */
 private const val WATERMARK_DOT = WATERMARK_DELTA
