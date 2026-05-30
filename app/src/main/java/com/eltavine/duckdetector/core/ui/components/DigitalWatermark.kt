@@ -94,11 +94,12 @@ private fun buildWatermarkBitmap(w: Int, h: Int, card: DeviceInfoCardModel): Bit
     val rng = SplitMix64(PRNG_SEED)
 
     for (bitIdx in bits.indices) {
-        if (!bits[bitIdx]) continue
         for (s in 0 until MAX_SAMPLES_PER_BIT) {
             val x = abs(rng.next().toInt()) % w
             val y = abs(rng.next().toInt()) % h
-            bmp.setPixel(x, y, 0x00000001)
+            if (bits[bitIdx]) {
+                bmp.setPixel(x, y, 0x00000001)
+            }
         }
     }
     return bmp
