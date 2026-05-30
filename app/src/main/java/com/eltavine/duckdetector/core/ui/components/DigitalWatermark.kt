@@ -36,15 +36,16 @@ import kotlin.math.abs
 /**
  * Invisible spread-spectrum digital watermark.
  *
- * Embeds device-identity data into the rendered UI by adding +1 to the
- * blue channel of selected pixels.  Pixel positions are determined by a
+ * Embeds device-identity data into the rendered UI by adding +2 to the
+ * blue channel of 2×2 pixel blocks.  Block positions are determined by a
  * seeded PRNG, spreading each data bit across ~32 screen locations.
  *
  * ## Properties
- * - **Completely invisible** — single-bit blue-channel change.
+ * - **Completely invisible** — 2-level blue-channel change on 2×2 blocks.
  * - **Screenshot-safe** — pixel-perfect capture preserves every bit.
  * - **Compression-resistant** — 32× repetition per bit enables
  *   majority-vote recovery after JPEG/PNG compression.
+ * - **JPEG 4:2:0 safe** — 2×2 blocks match chroma-subsampling unit.
  * - **No touch interception** — pure draw layer behind content.
  *
  * ## Payload (binary)
@@ -86,6 +87,19 @@ private const val PRNG_SEED = 0x4B1D57ADL
 private const val SPREAD_FACTOR = 32
 private const val MAX_SAMPLES_PER_BIT = 8
 
+/** Blue-channel delta added per pixel.  Must match the decoder. */
+private const val WATERMARK_DELTA = 2
+
+/**
+ * Size of the pixel block modified per sample (BLOCK_SIZE × BLOCK_SIZE).
+ * Matching JPEG 4:2:0 chroma-subsampling unit (2×2) makes the watermark
+ * survive lossy compression.
+ */
+private const val BLOCK_SIZE = 2
+
+/** ARGB pixel value for one watermark "dot": A=0, R=0, G=0, B=WATERMARK_DELTA. */
+private const val WATERMARK_DOT = WATERMARK_DELTA // 0x0000000X
+
 private fun buildWatermarkBitmap(w: Int, h: Int, card: DeviceInfoCardModel): Bitmap {
     val payload = encodePayload(card)
     val bits = spreadBits(payload, SPREAD_FACTOR)
@@ -95,10 +109,18 @@ private fun buildWatermarkBitmap(w: Int, h: Int, card: DeviceInfoCardModel): Bit
 
     for (bitIdx in bits.indices) {
         for (s in 0 until MAX_SAMPLES_PER_BIT) {
-            val x = abs(rng.next().toInt()) % w
-            val y = abs(rng.next().toInt()) % h
+            val bx = abs(rng.next().toInt()) % w
+            val by = abs(rng.next().toInt()) % h
             if (bits[bitIdx]) {
-                bmp.setPixel(x, y, 0x00000001)
+                // Write a BLOCK_SIZE×BLOCK_SIZE block so the watermark
+                // survives JPEG 4:2:0 chroma sub-sampling.
+                for (dx in 0 until BLOCK_SIZE) {
+                    for (dy in 0 until BLOCK_SIZE) {
+                        val px = (bx + dx).coerceIn(0, w - 1)
+                        val py = (by + dy).coerceIn(0, h - 1)
+                        bmp.setPixel(px, py, WATERMARK_DOT)
+                    }
+                }
             }
         }
     }
