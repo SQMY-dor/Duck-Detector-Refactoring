@@ -146,12 +146,12 @@ private fun spreadBits(payload: ByteArray, factor: Int): BooleanArray {
 // ── PRNG (portable SplitMix64) ────────────────────────────────────
 
 private class SplitMix64(seed: Long) {
-    private var state: Long = seed
+    private var state: ULong = seed.toULong()
     fun next(): Long {
-        state += 0x9E3779B97F4A7C15L
+        state += 0x9E3779B97F4A7C15uL
         var z = state
-        z = (z xor (z ushr 30)) * 0xBF58476D1CE4E5B9L
-        z = (z xor (z ushr 27)) * 0x94D049BB133111EBL
-        return z xor (z ushr 31)
+        z = (z xor (z shr 30)) * 0xBF58476D1CE4E5B9uL
+        z = (z xor (z shr 27)) * 0x94D049BB133111EBuL
+        return (z xor (z shr 31)).toLong()
     }
 }
