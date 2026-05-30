@@ -45,7 +45,7 @@ import kotlin.math.abs
  * - Compact binary payload (14 bytes): CRC32 + brand/model/sdk/fp/soc
  * - 8×8 non-overlapping blocks, each used at most once (tracked)
  * - 32× spread per raw bit, 8 sample blocks each = 256 blocks/bit
- * - PRNG always advances → decoder deterministically locates samples
+ * - PorterDuff.Mode.ADD for transparent overlay
  *
  * ## Payload (binary, 14 bytes)
  * ```
@@ -68,8 +68,13 @@ fun DigitalWatermark(
     Box(modifier = modifier.fillMaxSize().onSizeChanged { containerSize = it }) {
         if (watermarkBitmap != null) {
             Canvas(modifier = Modifier.fillMaxSize()) {
+                val paint = android.graphics.Paint().apply {
+                    xfermode = android.graphics.PorterDuffXfermode(
+                        android.graphics.PorterDuff.Mode.ADD,
+                    )
+                }
                 drawContext.canvas.nativeCanvas.drawBitmap(
-                    watermarkBitmap!!, 0f, 0f, null,
+                    watermarkBitmap!!, 0f, 0f, paint,
                 )
             }
         }
@@ -110,7 +115,6 @@ private fun buildWatermarkBitmap(w: Int, h: Int, card: DeviceInfoCardModel): Bit
 
     for (bitIdx in bits.indices) {
         for (s in 0 until MAX_SAMPLES_PER_BIT) {
-            // Try to find an unused 8×8 block cell.
             for (attempt in 0 until MAX_PLACEMENT_RETRIES) {
                 val cx = abs(rng.next().toInt()) % cellsW
                 val cy = abs(rng.next().toInt()) % cellsH
@@ -143,15 +147,6 @@ private fun writeBlock(bmp: Bitmap, cx: Int, cy: Int) {
 
 // ── Compact binary payload (14 bytes) ─────────────────────────────
 
-/**
- * Compact payload format:
- *   [0..3]  CRC32 of bytes [4..13] (big-endian)
- *   [4]     Brand enum
- *   [5..6]  Model hash (first 2 bytes of CRC32 of model string)
- *   [7]     SDK_INT
- *   [8..11] Fingerprint hash (CRC32 of full fingerprint)
- *   [12..13] SOC hash (first 2 bytes of CRC32 of SOC string)
- */
 private fun encodeCompactPayload(card: DeviceInfoCardModel): ByteArray {
     val map = mutableMapOf<String, String>()
     card.sections.forEach { s -> s.rows.forEach { r -> map[r.label] = r.value } }
@@ -180,7 +175,7 @@ private fun encodeCompactPayload(card: DeviceInfoCardModel): ByteArray {
     fields[9] = socHash.toByte()
 
     val crc = CRC32().apply { update(fields) }.value.toInt()
-    val payload = ByteArray(4 + fields.size) // 14 bytes
+    val payload = ByteArray(4 + fields.size)
     payload[0] = (crc shr 24).toByte()
     payload[1] = (crc shr 16).toByte()
     payload[2] = (crc shr 8).toByte()
@@ -206,7 +201,6 @@ private fun encodeBrand(name: String): Byte = when {
     else -> 0
 }
 
-/** First 2 bytes of CRC32, used as compact hash. */
 private fun crc16(text: String): Int {
     val crc = CRC32().apply { update(text.toByteArray(Charsets.UTF_8)) }.value.toInt()
     return (crc shr 16) and 0xFFFF
