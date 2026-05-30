@@ -17,7 +17,6 @@
 package com.eltavine.duckdetector.core.ui.components
 
 import android.graphics.Bitmap
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -26,6 +25,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
@@ -34,50 +34,69 @@ import java.util.zip.CRC32
 import kotlin.math.abs
 
 /**
- * Invisible spread-spectrum digital watermark — JPEG & PNG compatible.
+ * Invisible spread-spectrum digital watermark (JPEG & PNG compatible).
  *
- * Embeds a compact device-identity payload by adding +15 to the blue
- * channel of non-overlapping 8×8 pixel blocks.  The 8×8 grid aligns
- * with JPEG's DCT block structure, so the modification becomes a DC
- * offset that survives lossy compression.
+ * Adds +15 to the blue channel of non-overlapping 8x8 pixel blocks.
+ * The 8x8 grid aligns with JPEG DCT blocks so the modification
+ * survives as a DC offset through lossy compression.
  *
- * ## Encoding
- * - Compact binary payload (14 bytes): CRC32 + brand/model/sdk/fp/soc
- * - 8×8 non-overlapping blocks, each used at most once (tracked)
- * - 32× spread per raw bit, 8 sample blocks each = 256 blocks/bit
- * - PorterDuff.Mode.ADD for transparent overlay
- *
- * ## Payload (binary, 14 bytes)
+ * ### Usage (Modifier extension -- recommended)
+ * ```kotlin
+ * Box(Modifier.fillMaxSize().digitalWatermark(deviceInfoCard)) {
+ *     // your UI content
+ * }
  * ```
- * [CRC32:4 BE] [brand:1] [modelHash:2] [sdk:1] [fpHash:4] [socHash:2]
- * ```
+ *
+ * Uses [drawWithContent] to draw AFTER children on the same canvas
+ * layer.  [android.graphics.BlendMode.PLUS] adds the watermark to
+ * the actual UI pixels -- critical for additive blend to work across
+ * Compose render layers.
  */
-@Composable
-fun DigitalWatermark(
+
+/** Applies the digital watermark on top of content drawn by this modifier. */
+fun Modifier.digitalWatermark(
     deviceInfoCard: DeviceInfoCardModel,
-    modifier: Modifier = Modifier,
-) {
-    var containerSize by remember { mutableStateOf(IntSize.Zero) }
+): Modifier {
+    var containerSize by mutableStateOf(IntSize.Zero)
 
     val watermarkBitmap: Bitmap? = remember(containerSize, deviceInfoCard) {
-        if (containerSize.width < BLOCK_SIZE * 2 || containerSize.height < BLOCK_SIZE * 2)
-            return@remember null
-        buildWatermarkBitmap(containerSize.width, containerSize.height, deviceInfoCard)
+        if (containerSize.width < BLOCK_SIZE * 2 ||
+            containerSize.height < BLOCK_SIZE * 2
+        ) return@remember null
+        buildWatermarkBitmap(
+            containerSize.width, containerSize.height, deviceInfoCard,
+        )
     }
 
-    Box(modifier = modifier.fillMaxSize().onSizeChanged { containerSize = it }) {
-        if (watermarkBitmap != null) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
+    return this
+        .onSizeChanged { containerSize = it }
+        .drawWithContent {
+            drawContent()  // children first (the actual UI)
+            if (watermarkBitmap != null) {
                 val paint = android.graphics.Paint().apply {
-                    xfermode = android.graphics.PorterDuffXfermode(
-                        android.graphics.PorterDuff.Mode.ADD,
-                    )
+                    blendMode = android.graphics.BlendMode.PLUS
                 }
                 drawContext.canvas.nativeCanvas.drawBitmap(
                     watermarkBitmap!!, 0f, 0f, paint,
                 )
             }
         }
+}
+
+/**
+ * Legacy composable wrapper.
+ *
+ * Prefer [Modifier.digitalWatermark] for new code.
+ * Wraps [content] in a [Box] with the watermark modifier applied.
+ */
+@Composable
+fun DigitalWatermark(
+    deviceInfoCard: DeviceInfoCardModel,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit = {},
+) {
+    Box(modifier = modifier.fillMaxSize().digitalWatermark(deviceInfoCard)) {
+        content()
     }
 }
 
@@ -86,29 +105,22 @@ fun DigitalWatermark(
 private const val PRNG_SEED = 0x4B1D57ADL
 private const val SPREAD_FACTOR = 32
 private const val MAX_SAMPLES_PER_BIT = 8
-
-/** 8×8 blocks align with JPEG DCT grid — DC modification survives compression. */
 private const val BLOCK_SIZE = 8
-
-/** Blue-channel delta per pixel in watermarked blocks. */
 private const val WATERMARK_DELTA = 15
-
-/** ARGB pixel value: A=0, R=0, G=0, B=WATERMARK_DELTA. */
 private const val WATERMARK_DOT = WATERMARK_DELTA
-
-/** Max attempts to find an unused block before skipping the sample. */
 private const val MAX_PLACEMENT_RETRIES = 500
 
 // ── Bitmap generation ─────────────────────────────────────────────
 
-private fun buildWatermarkBitmap(w: Int, h: Int, card: DeviceInfoCardModel): Bitmap {
+private fun buildWatermarkBitmap(
+    w: Int, h: Int, card: DeviceInfoCardModel,
+): Bitmap {
     val payload = encodeCompactPayload(card)
     val bits = spreadBits(payload, SPREAD_FACTOR)
 
     val cellsW = w / BLOCK_SIZE
     val cellsH = h / BLOCK_SIZE
-    val totalCells = cellsW * cellsH
-    val used = BooleanArray(totalCells)
+    val used = BooleanArray(cellsW * cellsH)
 
     val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
     val rng = SplitMix64(PRNG_SEED)
@@ -121,9 +133,7 @@ private fun buildWatermarkBitmap(w: Int, h: Int, card: DeviceInfoCardModel): Bit
                 val cellIdx = cy * cellsW + cx
                 if (!used[cellIdx]) {
                     used[cellIdx] = true
-                    if (bits[bitIdx]) {
-                        writeBlock(bmp, cx, cy)
-                    }
+                    if (bits[bitIdx]) writeBlock(bmp, cx, cy)
                     break
                 }
             }
@@ -132,7 +142,6 @@ private fun buildWatermarkBitmap(w: Int, h: Int, card: DeviceInfoCardModel): Bit
     return bmp
 }
 
-/** Fill one BLOCK_SIZE×BLOCK_SIZE cell with WATERMARK_DOT. */
 private fun writeBlock(bmp: Bitmap, cx: Int, cy: Int) {
     val x0 = cx * BLOCK_SIZE
     val y0 = cy * BLOCK_SIZE
@@ -145,7 +154,7 @@ private fun writeBlock(bmp: Bitmap, cx: Int, cy: Int) {
     }
 }
 
-// ── Compact binary payload (14 bytes) ─────────────────────────────
+// ── Compact payload (14 bytes) ────────────────────────────────────
 
 private fun encodeCompactPayload(card: DeviceInfoCardModel): ByteArray {
     val map = mutableMapOf<String, String>()
@@ -159,7 +168,9 @@ private fun encodeCompactPayload(card: DeviceInfoCardModel): ByteArray {
 
     val brandByte = encodeBrand(brand)
     val modelHash = crc16(model)
-    val fpHash = CRC32().apply { update(fingerprint.toByteArray(Charsets.UTF_8)) }.value.toInt()
+    val fpHash = CRC32()
+        .apply { update(fingerprint.toByteArray(Charsets.UTF_8)) }
+        .value.toInt()
     val socHash = crc16(soc)
 
     val fields = ByteArray(10)
@@ -202,7 +213,9 @@ private fun encodeBrand(name: String): Byte = when {
 }
 
 private fun crc16(text: String): Int {
-    val crc = CRC32().apply { update(text.toByteArray(Charsets.UTF_8)) }.value.toInt()
+    val crc = CRC32()
+        .apply { update(text.toByteArray(Charsets.UTF_8)) }
+        .value.toInt()
     return (crc shr 16) and 0xFFFF
 }
 
@@ -222,7 +235,7 @@ private fun spreadBits(payload: ByteArray, factor: Int): BooleanArray {
     return spread
 }
 
-// ── PRNG (portable SplitMix64) ────────────────────────────────────
+// ── PRNG ──────────────────────────────────────────────────────────
 
 private class SplitMix64(seed: Long) {
     private var state: ULong = seed.toULong()
