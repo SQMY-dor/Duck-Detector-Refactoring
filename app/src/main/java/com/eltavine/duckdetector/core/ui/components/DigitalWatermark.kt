@@ -34,23 +34,22 @@ import java.util.zip.CRC32
 import kotlin.math.abs
 
 /**
- * Invisible spread-spectrum digital watermark.
+ * Invisible spread-spectrum digital watermark — JPEG & PNG compatible.
  *
- * Embeds device-identity data into the rendered UI by adding +5 to the
- * blue channel of pseudorandomly chosen pixels.  Positions are determined
- * by a seeded PRNG (SplitMix64), with each data bit spread across 32
- * screen locations and 8 samples each (= 256 pixels per bit).
+ * Embeds a compact device-identity payload by adding +5 to the blue
+ * channel of non-overlapping 8×8 pixel blocks.  The 8×8 grid aligns
+ * with JPEG's DCT block structure, so the modification becomes a DC
+ * offset that survives lossy compression.
  *
- * ## Properties
- * - **Completely invisible** — 5-level blue-channel change on single pixels.
- * - **PNG screenshot-safe** — lossless capture preserves every bit.
- * - **Mean-detection decoding** — per-bit mean of 256 samples vs global
- *   median baseline; 5σ separation on typical content.
- * - **No touch interception** — pure draw layer behind content.
+ * ## Encoding
+ * - Compact binary payload (14 bytes): CRC32 + brand/model/sdk/fp/soc
+ * - 8×8 non-overlapping blocks, each used at most once (tracked)
+ * - 32× spread per raw bit, 8 sample blocks each = 256 blocks/bit
+ * - PRNG always advances → decoder deterministically locates samples
  *
- * ## Payload (binary)
+ * ## Payload (binary, 14 bytes)
  * ```
- * [CRC32:4 bytes BE] [identity-text:UTF-8]
+ * [CRC32:4 BE] [brand:1] [modelHash:2] [sdk:1] [fpHash:4] [socHash:2]
  * ```
  */
 @Composable
@@ -61,84 +60,159 @@ fun DigitalWatermark(
     var containerSize by remember { mutableStateOf(IntSize.Zero) }
 
     val watermarkBitmap: Bitmap? = remember(containerSize, deviceInfoCard) {
-        if (containerSize.width < 16 || containerSize.height < 16) return@remember null
+        if (containerSize.width < BLOCK_SIZE * 2 || containerSize.height < BLOCK_SIZE * 2)
+            return@remember null
         buildWatermarkBitmap(containerSize.width, containerSize.height, deviceInfoCard)
     }
 
     Box(modifier = modifier.fillMaxSize().onSizeChanged { containerSize = it }) {
         if (watermarkBitmap != null) {
             Canvas(modifier = Modifier.fillMaxSize()) {
-                val paint = android.graphics.Paint().apply {
-                    xfermode = android.graphics.PorterDuffXfermode(
-                        android.graphics.PorterDuff.Mode.ADD,
-                    )
-                }
                 drawContext.canvas.nativeCanvas.drawBitmap(
-                    watermarkBitmap!!, 0f, 0f, paint,
+                    watermarkBitmap!!, 0f, 0f, null,
                 )
             }
         }
     }
 }
 
-// ── Bitmap generation ─────────────────────────────────────────────
+// ── Constants ─────────────────────────────────────────────────────
 
 private const val PRNG_SEED = 0x4B1D57ADL
 private const val SPREAD_FACTOR = 32
 private const val MAX_SAMPLES_PER_BIT = 8
 
-/** Blue-channel delta added to each watermarked pixel.  Must match the decoder. */
+/** 8×8 blocks align with JPEG DCT grid — DC modification survives compression. */
+private const val BLOCK_SIZE = 8
+
+/** Blue-channel delta per pixel in watermarked blocks. */
 private const val WATERMARK_DELTA = 5
 
-/** ARGB pixel value for one watermark "dot": A=0, R=0, G=0, B=WATERMARK_DELTA. */
-private const val WATERMARK_DOT = WATERMARK_DELTA // 0x0000000X
+/** ARGB pixel value: A=0, R=0, G=0, B=WATERMARK_DELTA. */
+private const val WATERMARK_DOT = WATERMARK_DELTA
+
+/** Max attempts to find an unused block before skipping the sample. */
+private const val MAX_PLACEMENT_RETRIES = 500
+
+// ── Bitmap generation ─────────────────────────────────────────────
 
 private fun buildWatermarkBitmap(w: Int, h: Int, card: DeviceInfoCardModel): Bitmap {
-    val payload = encodePayload(card)
+    val payload = encodeCompactPayload(card)
     val bits = spreadBits(payload, SPREAD_FACTOR)
+
+    val cellsW = w / BLOCK_SIZE
+    val cellsH = h / BLOCK_SIZE
+    val totalCells = cellsW * cellsH
+    val used = BooleanArray(totalCells)
 
     val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
     val rng = SplitMix64(PRNG_SEED)
 
     for (bitIdx in bits.indices) {
         for (s in 0 until MAX_SAMPLES_PER_BIT) {
-            val x = abs(rng.next().toInt()) % w
-            val y = abs(rng.next().toInt()) % h
-            if (bits[bitIdx]) {
-                // Single-pixel modification avoids block-overlap saturation.
-                // PRNG always advances (for both 0 and 1 bits) so the decoder
-                // can deterministically locate every sample position.
-                bmp.setPixel(x, y, WATERMARK_DOT)
+            // Try to find an unused 8×8 block cell.
+            for (attempt in 0 until MAX_PLACEMENT_RETRIES) {
+                val cx = abs(rng.next().toInt()) % cellsW
+                val cy = abs(rng.next().toInt()) % cellsH
+                val cellIdx = cy * cellsW + cx
+                if (!used[cellIdx]) {
+                    used[cellIdx] = true
+                    if (bits[bitIdx]) {
+                        writeBlock(bmp, cx, cy)
+                    }
+                    break
+                }
             }
         }
     }
     return bmp
 }
 
-// ── Payload ───────────────────────────────────────────────────────
+/** Fill one BLOCK_SIZE×BLOCK_SIZE cell with WATERMARK_DOT. */
+private fun writeBlock(bmp: Bitmap, cx: Int, cy: Int) {
+    val x0 = cx * BLOCK_SIZE
+    val y0 = cy * BLOCK_SIZE
+    val x1 = minOf(x0 + BLOCK_SIZE, bmp.width)
+    val y1 = minOf(y0 + BLOCK_SIZE, bmp.height)
+    for (px in x0 until x1) {
+        for (py in y0 until y1) {
+            bmp.setPixel(px, py, WATERMARK_DOT)
+        }
+    }
+}
 
-private fun encodePayload(card: DeviceInfoCardModel): ByteArray {
-    val text = buildIdentityString(card)
-    val textBytes = text.toByteArray(Charsets.UTF_8)
-    val crc = CRC32().apply { update(textBytes) }.value.toInt()
-    val payload = ByteArray(4 + textBytes.size)
+// ── Compact binary payload (14 bytes) ─────────────────────────────
+
+/**
+ * Compact payload format:
+ *   [0..3]  CRC32 of bytes [4..13] (big-endian)
+ *   [4]     Brand enum
+ *   [5..6]  Model hash (first 2 bytes of CRC32 of model string)
+ *   [7]     SDK_INT
+ *   [8..11] Fingerprint hash (CRC32 of full fingerprint)
+ *   [12..13] SOC hash (first 2 bytes of CRC32 of SOC string)
+ */
+private fun encodeCompactPayload(card: DeviceInfoCardModel): ByteArray {
+    val map = mutableMapOf<String, String>()
+    card.sections.forEach { s -> s.rows.forEach { r -> map[r.label] = r.value } }
+
+    val brand = map["Brand"] ?: "Unknown"
+    val model = map["Model"] ?: "Unknown"
+    val sdk = (map["SDK"] ?: "0").filter { it.isDigit() }.toIntOrNull() ?: 0
+    val fingerprint = map["Fingerprint"] ?: "Unknown"
+    val soc = map["SOC Model"] ?: "Unknown"
+
+    val brandByte = encodeBrand(brand)
+    val modelHash = crc16(model)
+    val fpHash = CRC32().apply { update(fingerprint.toByteArray(Charsets.UTF_8)) }.value.toInt()
+    val socHash = crc16(soc)
+
+    val fields = ByteArray(10)
+    fields[0] = brandByte
+    fields[1] = (modelHash shr 8).toByte()
+    fields[2] = modelHash.toByte()
+    fields[3] = sdk.coerceIn(0, 255).toByte()
+    fields[4] = (fpHash shr 24).toByte()
+    fields[5] = (fpHash shr 16).toByte()
+    fields[6] = (fpHash shr 8).toByte()
+    fields[7] = fpHash.toByte()
+    fields[8] = (socHash shr 8).toByte()
+    fields[9] = socHash.toByte()
+
+    val crc = CRC32().apply { update(fields) }.value.toInt()
+    val payload = ByteArray(4 + fields.size) // 14 bytes
     payload[0] = (crc shr 24).toByte()
     payload[1] = (crc shr 16).toByte()
     payload[2] = (crc shr 8).toByte()
     payload[3] = crc.toByte()
-    textBytes.copyInto(payload, 4)
+    fields.copyInto(payload, 4)
     return payload
 }
 
-private fun buildIdentityString(card: DeviceInfoCardModel): String {
-    val map = mutableMapOf<String, String>()
-    card.sections.forEach { s -> s.rows.forEach { r -> map[r.label] = r.value } }
-    val fields = listOf(
-        map["Brand"], map["Model"], map["Release"], map["SDK"],
-        map["Fingerprint"], map["SOC Model"],
-    ).mapNotNull { it?.takeIf { v -> v != "Unavailable" }?.take(48) }
-    return if (fields.isEmpty()) "DuckDetector" else fields.joinToString("|")
+private fun encodeBrand(name: String): Byte = when {
+    name.contains("Samsung", ignoreCase = true) -> 1
+    name.contains("OnePlus", ignoreCase = true) -> 2
+    name.contains("Xiaomi", ignoreCase = true) -> 3
+    name.contains("Google", ignoreCase = true) -> 4
+    name.contains("OPPO", ignoreCase = true) -> 5
+    name.contains("vivo", ignoreCase = true) -> 6
+    name.contains("realme", ignoreCase = true) -> 7
+    name.contains("Motorola", ignoreCase = true) -> 8
+    name.contains("Nothing", ignoreCase = true) -> 9
+    name.contains("ASUS", ignoreCase = true) -> 10
+    name.contains("Sony", ignoreCase = true) -> 11
+    name.contains("Huawei", ignoreCase = true) -> 12
+    name.contains("Honor", ignoreCase = true) -> 13
+    else -> 0
 }
+
+/** First 2 bytes of CRC32, used as compact hash. */
+private fun crc16(text: String): Int {
+    val crc = CRC32().apply { update(text.toByteArray(Charsets.UTF_8)) }.value.toInt()
+    return (crc shr 16) and 0xFFFF
+}
+
+// ── Bit spreading ─────────────────────────────────────────────────
 
 private fun spreadBits(payload: ByteArray, factor: Int): BooleanArray {
     val raw = BooleanArray(payload.size * 8) { i ->
