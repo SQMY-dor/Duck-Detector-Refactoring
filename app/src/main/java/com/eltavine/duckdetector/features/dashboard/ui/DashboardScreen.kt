@@ -119,6 +119,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 private const val MAX_EXPORT_BITMAP_HEIGHT = 16_384
 private val EXPORT_RELATIVE_DIR = "${Environment.DIRECTORY_PICTURES}/DuckDetector"
