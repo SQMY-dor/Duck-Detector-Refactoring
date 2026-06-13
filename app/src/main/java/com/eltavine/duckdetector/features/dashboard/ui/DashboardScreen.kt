@@ -879,11 +879,9 @@ private suspend fun saveBitmapToGallery(
     val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
         ?: error("Failed to create MediaStore record")
 
-    val rgbBitmap = bitmap.copy(Bitmap.Config.RGB_565, false)
-
     try {
         resolver.openOutputStream(uri)?.use { output ->
-            if (!rgbBitmap.compress(Bitmap.CompressFormat.JPEG, EXPORT_JPEG_QUALITY, output)) {
+            if (!bitmap.compress(Bitmap.CompressFormat.JPEG, EXPORT_JPEG_QUALITY, output)) {
                 error("JPEG compression failed")
             }
         } ?: error("Failed to open output stream")
@@ -898,7 +896,5 @@ private suspend fun saveBitmapToGallery(
     } catch (throwable: Throwable) {
         resolver.delete(uri, null, null)
         throw throwable
-    } finally {
-        rgbBitmap.recycle()
     }
 }
