@@ -816,17 +816,9 @@ private fun renderViewToBitmap(
     width: Int,
     height: Int,
 ): Bitmap {
-    val pixelScale = sqrt(
-        (MAX_EXPORT_PIXEL_COUNT.toDouble() / (width.toDouble() * height.toDouble()))
-            .coerceAtMost(1.0),
-    ).toFloat()
-    val heightScale = (MAX_EXPORT_BITMAP_HEIGHT.toFloat() / height.toFloat()).coerceAtMost(1f)
-    val scale = min(1f, min(pixelScale, heightScale))
-    val bitmapWidth = (width * scale).roundToInt().coerceAtLeast(1)
-    val bitmapHeight = (height * scale).roundToInt().coerceAtLeast(1)
-    val bitmap = Bitmap.createBitmap(bitmapWidth, bitmapHeight, Bitmap.Config.ARGB_8888)
+    val bitmapHeight = height.coerceAtMost(MAX_EXPORT_BITMAP_HEIGHT)
+    val bitmap = Bitmap.createBitmap(width, bitmapHeight, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
-    canvas.scale(scale, scale)
     view.draw(canvas)
     return bitmap
 }
