@@ -118,12 +118,9 @@ import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.math.min
 import kotlin.math.roundToInt
-import kotlin.math.sqrt
 
 private const val MAX_EXPORT_BITMAP_HEIGHT = 16_384
-private const val MAX_EXPORT_PIXEL_COUNT = 24_000_000L
 private val EXPORT_RELATIVE_DIR = "${Environment.DIRECTORY_PICTURES}/DuckDetector"
 
 @Composable
@@ -709,7 +706,7 @@ private suspend fun exportDashboardLongScreenshot(
     uiState: DashboardUiState,
     darkTheme: Boolean,
 ): Uri {
-    val bitmap = withContext(Dispatchers.Main) {
+    return withContext(Dispatchers.Main) {
         val host = anchorView.rootView as? ViewGroup
             ?: error("Unable to access root view for export")
         val displayMetrics = context.resources.displayMetrics
