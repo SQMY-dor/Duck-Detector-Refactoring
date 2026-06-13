@@ -79,7 +79,7 @@ fun Modifier.digitalWatermark(
                         blendMode = android.graphics.BlendMode.PLUS
                     }
                     drawContext.canvas.nativeCanvas.drawBitmap(
-                        watermarkBitmap!!, 0f, 0f, paint,
+                        watermarkBitmap, 0f, 0f, paint,
                     )
                 }
             }

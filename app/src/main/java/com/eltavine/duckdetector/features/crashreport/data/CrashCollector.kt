@@ -103,7 +103,7 @@ internal object CrashCollector {
                 CrashDeviceEntry("Board Platform", readProp("ro.board.platform").orUnavailable()),
                 CrashDeviceEntry("Chip Name", readProp("ro.chipname").orUnavailable()),
                 CrashDeviceEntry("CPU Cores", Runtime.getRuntime().availableProcessors().toString()),
-                CrashDeviceEntry("CPU Arch", safeString { System.getProperty("os.arch") }.orUnavailable()),
+                CrashDeviceEntry("CPU Arch", safeString { System.getProperty("os.arch") ?: "" }.orUnavailable()),
                 CrashDeviceEntry("ABI List", Build.SUPPORTED_ABIS.joinToString().orUnavailable()),
             ),
         )
@@ -143,7 +143,7 @@ internal object CrashCollector {
             entries = listOf(
                 CrashDeviceEntry("Security patch", Build.VERSION.SECURITY_PATCH.orUnavailable()),
                 CrashDeviceEntry("Primary ABI", Build.SUPPORTED_ABIS.firstOrNull().orUnavailable()),
-                CrashDeviceEntry("Kernel", safeString { System.getProperty("os.version") }.orUnavailable()),
+                CrashDeviceEntry("Kernel", safeString { System.getProperty("os.version") ?: "" }.orUnavailable()),
                 CrashDeviceEntry("Locale", Locale.getDefault().toLanguageTag()),
                 CrashDeviceEntry("Time zone", TimeZone.getDefault().id),
             ),

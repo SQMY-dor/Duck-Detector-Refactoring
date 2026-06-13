@@ -418,7 +418,7 @@ object CrashHandler {
                         if (currentSection != null && currentSection !in listOf("cause", "stack")) {
                             deviceSections.add(
                                 CrashDeviceSection(
-                                    title = currentSection ?: "Unknown",
+                                    title = currentSection,
                                     entries = currentSectionEntries.toList(),
                                 ),
                             )
@@ -432,7 +432,7 @@ object CrashHandler {
                         if (currentSection != null && currentSection !in listOf("cause", "stack")) {
                             deviceSections.add(
                                 CrashDeviceSection(
-                                    title = currentSection ?: "Unknown",
+                                    title = currentSection,
                                     entries = currentSectionEntries.toList(),
                                 ),
                             )
@@ -465,7 +465,7 @@ object CrashHandler {
             if (currentSection != null && currentSection != "cause" && currentSection != "stack") {
                 deviceSections.add(
                     CrashDeviceSection(
-                        title = currentSection ?: "Unknown",
+                        title = currentSection,
                         entries = currentSectionEntries.toList(),
                     ),
                 )
