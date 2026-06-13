@@ -785,14 +785,14 @@ private suspend fun exportDashboardLongScreenshot(
 
         container.addView(composeView)
         host.addView(container)
-        val bitmaps = try {
+        val bitmap = try {
             delay(80L)
             val widthSpec = View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY)
             val heightSpec = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
             composeView.measure(widthSpec, heightSpec)
             val measuredHeight = composeView.measuredHeight.coerceAtLeast(1)
             composeView.layout(0, 0, width, measuredHeight)
-            renderViewToBitmaps(
+            renderViewToBitmap(
                 view = composeView,
                 width = width,
                 height = measuredHeight,
@@ -800,21 +800,19 @@ private suspend fun exportDashboardLongScreenshot(
         } finally {
             host.removeView(container)
         }
-
-        val mergedBitmap = mergeBitmapsVertically(bitmaps)
-        bitmaps.forEach { it.recycle() }
-
-        return try {
-            saveBitmapToGallery(
-                context = context,
-                bitmap = mergedBitmap,
-            )
-        } finally {
-            mergedBitmap.recycle()
-        }
     }
 
-private fun renderViewToBitmaps(
+    return try {
+        saveBitmapToGallery(
+            context = context,
+            bitmap = bitmap,
+        )
+    } finally {
+        bitmap.recycle()
+    }
+}
+
+private fun renderViewToBitmap(
     view: View,
     width: Int,
     height: Int,
