@@ -816,12 +816,12 @@ private fun renderViewToBitmap(
     view: View,
     width: Int,
     height: Int,
-): List<Bitmap> {
+): Bitmap {
     if (height <= MAX_EXPORT_BITMAP_HEIGHT) {
         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         view.draw(canvas)
-        return listOf(bitmap)
+        return bitmap
     }
 
     val bitmaps = mutableListOf<Bitmap>()
@@ -840,7 +840,7 @@ private fun renderViewToBitmap(
         remainingHeight -= segmentHeight
     }
 
-    return bitmaps
+    return mergeBitmapsVertically(bitmaps)
 }
 
 private fun mergeBitmapsVertically(bitmaps: List<Bitmap>): Bitmap {
@@ -856,6 +856,8 @@ private fun mergeBitmapsVertically(bitmaps: List<Bitmap>): Bitmap {
         canvas.drawBitmap(bitmap, 0f, offsetY.toFloat(), null)
         offsetY += bitmap.height
     }
+
+    bitmaps.forEach { it.recycle() }
 
     return merged
 }
