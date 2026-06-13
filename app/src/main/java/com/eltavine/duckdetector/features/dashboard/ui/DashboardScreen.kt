@@ -41,7 +41,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.matchParentSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -125,7 +124,7 @@ import kotlin.math.sqrt
 
 private const val MAX_EXPORT_BITMAP_HEIGHT = 16_384
 private const val MAX_EXPORT_PIXEL_COUNT = 24_000_000L
-private const val EXPORT_RELATIVE_DIR = "${Environment.DIRECTORY_PICTURES}/DuckDetector"
+private val EXPORT_RELATIVE_DIR = "${Environment.DIRECTORY_PICTURES}/DuckDetector"
 
 @Composable
 fun DashboardScreen(
@@ -267,7 +266,7 @@ private fun DashboardScreenContent(
         if (includeVisibleWatermark) {
             ExportDeviceInfoWatermarkOverlay(
                 deviceInfoCard = uiState.deviceInfoCard,
-                modifier = Modifier.matchParentSize(),
+                modifier = Modifier.fillMaxSize(),
             )
         }
     }

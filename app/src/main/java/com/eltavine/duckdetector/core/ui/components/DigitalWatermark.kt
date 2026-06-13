@@ -25,6 +25,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.onSizeChanged
@@ -57,30 +58,32 @@ import kotlin.math.abs
 fun Modifier.digitalWatermark(
     deviceInfoCard: DeviceInfoCardModel,
 ): Modifier {
-    var containerSize by mutableStateOf(IntSize.Zero)
+    return composed {
+        var containerSize by mutableStateOf(IntSize.Zero)
 
-    val watermarkBitmap: Bitmap? = remember(containerSize, deviceInfoCard) {
-        if (containerSize.width < BLOCK_SIZE * 2 ||
-            containerSize.height < BLOCK_SIZE * 2
-        ) return@remember null
-        buildWatermarkBitmap(
-            containerSize.width, containerSize.height, deviceInfoCard,
-        )
-    }
-
-    return this
-        .onSizeChanged { containerSize = it }
-        .drawWithContent {
-            drawContent()  // children first (the actual UI)
-            if (watermarkBitmap != null) {
-                val paint = android.graphics.Paint().apply {
-                    blendMode = android.graphics.BlendMode.PLUS
-                }
-                drawContext.canvas.nativeCanvas.drawBitmap(
-                    watermarkBitmap!!, 0f, 0f, paint,
-                )
-            }
+        val watermarkBitmap: Bitmap? = remember(containerSize, deviceInfoCard) {
+            if (containerSize.width < BLOCK_SIZE * 2 ||
+                containerSize.height < BLOCK_SIZE * 2
+            ) return@remember null
+            buildWatermarkBitmap(
+                containerSize.width, containerSize.height, deviceInfoCard,
+            )
         }
+
+        this
+            .onSizeChanged { containerSize = it }
+            .drawWithContent {
+                drawContent()  // children first (the actual UI)
+                if (watermarkBitmap != null) {
+                    val paint = android.graphics.Paint().apply {
+                        blendMode = android.graphics.BlendMode.PLUS
+                    }
+                    drawContext.canvas.nativeCanvas.drawBitmap(
+                        watermarkBitmap!!, 0f, 0f, paint,
+                    )
+                }
+            }
+    }
 }
 
 /**
