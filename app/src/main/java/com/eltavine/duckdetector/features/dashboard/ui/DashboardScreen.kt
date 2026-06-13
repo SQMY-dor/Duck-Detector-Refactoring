@@ -36,12 +36,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.matchParentSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -63,13 +63,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -77,19 +77,19 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.ViewCompositionStrategy
-import com.eltavine.duckdetector.core.ui.components.DetectorAutoExpansionDirective
-import com.eltavine.duckdetector.core.ui.components.LocalDetectorAutoExpansionDirective
 import com.eltavine.duckdetector.core.ui.components.MetricChip
 import com.eltavine.duckdetector.core.ui.components.StatusBadge
 import com.eltavine.duckdetector.core.ui.components.WrapSafeText
 import com.eltavine.duckdetector.core.ui.components.digitalWatermark
+import com.eltavine.duckdetector.core.ui.model.DetectorStatus
 import com.eltavine.duckdetector.core.ui.model.MetricChipModel
+import com.eltavine.duckdetector.core.ui.presentation.rememberStatusAppearance
 import com.eltavine.duckdetector.features.bootloader.ui.card.BootloaderDetectorCard
 import com.eltavine.duckdetector.features.customrom.ui.card.CustomRomDetectorCard
 import com.eltavine.duckdetector.features.dashboard.ui.model.DashboardDetectorCardEntry
@@ -125,7 +125,7 @@ import kotlin.math.sqrt
 
 private const val MAX_EXPORT_BITMAP_HEIGHT = 16_384
 private const val MAX_EXPORT_PIXEL_COUNT = 24_000_000L
-private const val EXPORT_RELATIVE_DIR = "${Environment.DIRECTORY_PICTURES}/DuckDetector"
+private val EXPORT_RELATIVE_DIR = "${Environment.DIRECTORY_PICTURES}/DuckDetector"
 
 @Composable
 fun DashboardScreen(
@@ -267,7 +267,7 @@ private fun DashboardScreenContent(
         if (includeVisibleWatermark) {
             ExportDeviceInfoWatermarkOverlay(
                 deviceInfoCard = uiState.deviceInfoCard,
-                modifier = Modifier.matchParentSize(),
+                modifier = Modifier.fillMaxSize(),
             )
         }
     }
@@ -596,14 +596,465 @@ private fun DashboardDetectorCard(
     }
 }
 
+@Immutable
+private data class ExportDetectorSummary(
+    val title: String,
+    val headline: String,
+    val summary: String,
+    val status: DetectorStatus,
+)
+
+@Composable
+private fun ExportDashboardReport(
+    uiState: DashboardUiState,
+    modifier: Modifier = Modifier,
+) {
+    val detectorSummaries = remember(uiState.detectorCards) {
+        uiState.detectorCards.map(::toExportDetectorSummary)
+    }
+    val factMap = remember(uiState.deviceInfoCard) {
+        extractDeviceFactMap(uiState.deviceInfoCard)
+    }
+
+    Box(
+        modifier = modifier
+            .background(MaterialTheme.colorScheme.background)
+            .digitalWatermark(uiState.deviceInfoCard),
+    ) {
+        Column(
+            modifier = Modifier
+                .widthIn(max = 560.dp)
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            ExportDeviceHeroCard(
+                uiState = uiState,
+                factMap = factMap,
+            )
+            ExportOverviewCard(uiState = uiState)
+            ExportFindingsCard(uiState = uiState)
+            ExportDetectorSummariesCard(
+                summaries = detectorSummaries,
+            )
+            ExportDeviceSectionsCard(
+                deviceInfoCard = uiState.deviceInfoCard,
+            )
+        }
+
+        ExportDeviceInfoWatermarkOverlay(
+            deviceInfoCard = uiState.deviceInfoCard,
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+@Composable
+private fun ExportDeviceHeroCard(
+    uiState: DashboardUiState,
+    factMap: Map<String, String>,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = ShapeTokens.CornerExtraLargeIncreased,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top,
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    WrapSafeText(
+                        text = "Duck Detector Export",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    WrapSafeText(
+                        text = "${factMap["Brand"].orFallback()} ${factMap["Model"].orFallback()}",
+                        style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    WrapSafeText(
+                        text = truncateMiddle(factMap["Fingerprint"].orFallback(), 72),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                StatusBadge(
+                    status = uiState.overview.status,
+                    modifier = Modifier.padding(start = 12.dp),
+                )
+            }
+
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                ExportHeroFact(
+                    label = "Platform",
+                    value = factMap["Brand"].orFallback(),
+                )
+                ExportHeroFact(
+                    label = "Model",
+                    value = factMap["Model"].orFallback(),
+                )
+                ExportHeroFact(
+                    label = "OS",
+                    value = "Android ${factMap["Release"].orFallback()}",
+                )
+                ExportHeroFact(
+                    label = "Profile",
+                    value = "SDK ${factMap["SDK"].orFallback()}",
+                )
+            }
+
+            WrapSafeText(
+                text = uiState.overview.summary,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExportHeroFact(
+    label: String,
+    value: String,
+) {
+    Surface(
+        shape = ShapeTokens.CornerLarge,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            WrapSafeText(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            WrapSafeText(
+                text = value,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ExportOverviewCard(
+    uiState: DashboardUiState,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = ShapeTokens.CornerExtraLargeIncreased,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            WrapSafeText(
+                text = uiState.overview.title,
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            WrapSafeText(
+                text = uiState.overview.headline,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                uiState.overview.metrics.forEach { metric ->
+                    ExportMetricTile(
+                        label = metric.label,
+                        value = metric.value,
+                        status = metric.status,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExportMetricTile(
+    label: String,
+    value: String,
+    status: DetectorStatus,
+) {
+    val appearance = rememberStatusAppearance(status)
+    Surface(
+        modifier = Modifier.widthIn(min = 112.dp),
+        shape = ShapeTokens.CornerLarge,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    imageVector = appearance.icon,
+                    contentDescription = null,
+                    tint = appearance.iconTint,
+                    modifier = Modifier.size(16.dp),
+                )
+                WrapSafeText(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            WrapSafeText(
+                text = value,
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExportFindingsCard(
+    uiState: DashboardUiState,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = ShapeTokens.CornerExtraLargeIncreased,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            WrapSafeText(
+                text = "Top findings",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            uiState.topFindings.forEachIndexed { index, finding ->
+                if (index > 0) {
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.24f),
+                    )
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ExportStatusPill(finding.status)
+                    WrapSafeText(
+                        text = finding.detectorTitle,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    WrapSafeText(
+                        text = finding.headline,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    WrapSafeText(
+                        text = finding.detail,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExportDetectorSummariesCard(
+    summaries: List<ExportDetectorSummary>,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = ShapeTokens.CornerExtraLargeIncreased,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            WrapSafeText(
+                text = "Detector modules",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            summaries.forEach { summary ->
+                ExportDetectorSummaryItem(summary)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExportDetectorSummaryItem(
+    summary: ExportDetectorSummary,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = ShapeTokens.CornerLarge,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top,
+            ) {
+                WrapSafeText(
+                    text = summary.title,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                ExportStatusPill(
+                    status = summary.status,
+                    modifier = Modifier.padding(start = 10.dp),
+                )
+            }
+            WrapSafeText(
+                text = summary.headline,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            WrapSafeText(
+                text = summary.summary,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExportStatusPill(
+    status: DetectorStatus,
+    modifier: Modifier = Modifier,
+) {
+    val appearance = rememberStatusAppearance(status)
+    Surface(
+        modifier = modifier,
+        shape = ShapeTokens.CornerFull,
+        color = appearance.iconTint.copy(alpha = 0.14f),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(
+                imageVector = appearance.icon,
+                contentDescription = null,
+                tint = appearance.iconTint,
+                modifier = Modifier.size(15.dp),
+            )
+            WrapSafeText(
+                text = appearance.label,
+                style = MaterialTheme.typography.labelMedium,
+                color = appearance.iconTint,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ExportDeviceSectionsCard(
+    deviceInfoCard: DeviceInfoCardModel,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = ShapeTokens.CornerExtraLargeIncreased,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            WrapSafeText(
+                text = "Device information",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            deviceInfoCard.sections.forEachIndexed { index, section ->
+                if (index > 0) {
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f),
+                    )
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    WrapSafeText(
+                        text = section.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    section.rows.forEach { row ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.Top,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            WrapSafeText(
+                                text = row.label,
+                                modifier = Modifier.weight(0.34f),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            WrapSafeText(
+                                text = row.value,
+                                modifier = Modifier.weight(0.66f),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun ExportDeviceInfoWatermarkOverlay(
     deviceInfoCard: DeviceInfoCardModel,
     modifier: Modifier = Modifier,
-    alpha: Float = 0.085f,
-    textSizeSp: Float = 12f,
-    spacingDp: Float = 220f,
-    rotationDegrees: Float = -25f,
+    alpha: Float = 0.055f,
+    textSizeSp: Float = 10f,
+    spacingDp: Float = 170f,
+    rotationDegrees: Float = -28f,
 ) {
     val density = LocalDensity.current
     val isDarkTheme = isSystemInDarkTheme()
@@ -629,8 +1080,8 @@ private fun ExportDeviceInfoWatermarkOverlay(
 
         val lineHeight = paint.fontSpacing
         val widestLine = watermarkLines.maxOfOrNull(paint::measureText) ?: 0f
-        val safeHSpacing = maxOf(spacingPx, widestLine * 1.12f)
-        val safeVSpacing = maxOf(spacingPx * 0.48f, lineHeight * (watermarkLines.size + 1.2f))
+        val safeHSpacing = maxOf(spacingPx, widestLine * 0.96f)
+        val safeVSpacing = maxOf(spacingPx * 0.4f, lineHeight * (watermarkLines.size + 0.8f))
         val diagonal = sqrt(size.width * size.width + size.height * size.height)
         val startX = -diagonal / 2f
         val endX = size.width + diagonal / 2f
@@ -663,6 +1114,25 @@ private fun ExportDeviceInfoWatermarkOverlay(
 private fun buildVisibleWatermarkLines(
     deviceInfoCard: DeviceInfoCardModel,
 ): List<String> {
+    val facts = extractDeviceFactMap(deviceInfoCard)
+    val brand = facts["Brand"].orFallback()
+    val model = facts["Model"].orFallback()
+    val device = facts["Device"].orFallback()
+    val release = facts["Release"].orFallback()
+    val sdk = facts["SDK"].orFallback()
+    val fingerprint = truncateMiddle(facts["Fingerprint"].orFallback(), 34)
+    val exportedAt = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date())
+
+    return listOf(
+        "Duck Detector | $brand | Android $release | SDK $sdk",
+        "$model | $device | $fingerprint",
+        "Exported $exportedAt",
+    )
+}
+
+private fun extractDeviceFactMap(
+    deviceInfoCard: DeviceInfoCardModel,
+): Map<String, String> {
     val facts = mutableMapOf<String, String>()
     deviceInfoCard.headerFacts.forEach { fact ->
         facts[fact.label] = fact.value
@@ -672,21 +1142,7 @@ private fun buildVisibleWatermarkLines(
             facts[row.label] = row.value
         }
     }
-
-    val brand = facts["Brand"].orFallback()
-    val model = facts["Model"].orFallback()
-    val device = facts["Device"].orFallback()
-    val release = facts["Release"].orFallback()
-    val sdk = facts["SDK"].orFallback()
-    val securityPatch = facts["Security patch"].orFallback()
-    val fingerprint = truncateMiddle(facts["Fingerprint"].orFallback(), 44)
-
-    return listOf(
-        "Duck Detector export",
-        "Brand $brand | Model $model | Device $device",
-        "Android $release | SDK $sdk | Patch $securityPatch",
-        "Fingerprint $fingerprint",
-    )
+    return facts
 }
 
 private fun String?.orFallback(): String {
@@ -732,48 +1188,12 @@ private suspend fun exportDashboardLongScreenshot(
                     darkTheme = darkTheme,
                     dynamicColor = false,
                 ) {
-                    CompositionLocalProvider(
-                        LocalDetectorAutoExpansionDirective provides DetectorAutoExpansionDirective(
-                            titles = uiState.detectorCards.mapTo(mutableSetOf()) { entry ->
-                                when (entry) {
-                                    is DashboardDetectorCardEntry.Bootloader -> entry.model.title
-                                    is DashboardDetectorCardEntry.CustomRom -> entry.model.title
-                                    is DashboardDetectorCardEntry.DangerousApps -> entry.model.title
-                                    is DashboardDetectorCardEntry.KernelCheck -> entry.model.title
-                                    is DashboardDetectorCardEntry.LSPosed -> entry.model.title
-                                    is DashboardDetectorCardEntry.Memory -> entry.model.title
-                                    is DashboardDetectorCardEntry.Mount -> entry.model.title
-                                    is DashboardDetectorCardEntry.NativeRoot -> entry.model.title
-                                    is DashboardDetectorCardEntry.PlayIntegrityFix -> entry.model.title
-                                    is DashboardDetectorCardEntry.Selinux -> entry.model.title
-                                    is DashboardDetectorCardEntry.Su -> entry.model.title
-                                    is DashboardDetectorCardEntry.SystemProperties -> entry.model.title
-                                    is DashboardDetectorCardEntry.Tee -> entry.model.title
-                                    is DashboardDetectorCardEntry.Virtualization -> entry.model.title
-                                    is DashboardDetectorCardEntry.Zygisk -> entry.model.title
-                                }
-                            },
-                        ),
-                    ) {
-                        DashboardScreenContent(
-                            uiState = uiState,
-                            showTeeDetailsDialog = false,
-                            showTeeCertificatesDialog = false,
-                            onTeeExpandedChange = {},
-                            onTeeFooterAction = {},
-                            onDismissTeeDetails = {},
-                            onDismissTeeCertificates = {},
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .wrapContentHeight(),
-                            scrollable = false,
-                            includeSystemBarsPadding = false,
-                            includeVisibleWatermark = true,
-                            showExportButton = false,
-                            exporting = false,
-                            onExportClick = {},
-                        )
-                    }
+                    ExportDashboardReport(
+                        uiState = uiState,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .wrapContentHeight(),
+                    )
                 }
             }
         }
@@ -781,16 +1201,19 @@ private suspend fun exportDashboardLongScreenshot(
         container.addView(composeView)
         host.addView(container)
         try {
-            delay(80L)
+            delay(120L)
             val widthSpec = View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY)
             val heightSpec = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
             composeView.measure(widthSpec, heightSpec)
             val measuredHeight = composeView.measuredHeight.coerceAtLeast(1)
             composeView.layout(0, 0, width, measuredHeight)
+            delay(32L)
+            composeView.measure(widthSpec, heightSpec)
+            composeView.layout(0, 0, width, composeView.measuredHeight.coerceAtLeast(1))
             renderViewToBitmap(
                 view = composeView,
                 width = width,
-                height = measuredHeight,
+                height = composeView.measuredHeight.coerceAtLeast(1),
             )
         } finally {
             host.removeView(container)
@@ -825,6 +1248,117 @@ private fun renderViewToBitmap(
     canvas.scale(scale, scale)
     view.draw(canvas)
     return bitmap
+}
+
+private fun toExportDetectorSummary(
+    entry: DashboardDetectorCardEntry,
+): ExportDetectorSummary {
+    return when (entry) {
+        is DashboardDetectorCardEntry.Bootloader -> ExportDetectorSummary(
+            title = entry.model.title,
+            headline = entry.model.verdict,
+            summary = entry.model.summary,
+            status = entry.model.status,
+        )
+
+        is DashboardDetectorCardEntry.CustomRom -> ExportDetectorSummary(
+            title = entry.model.title,
+            headline = entry.model.verdict,
+            summary = entry.model.summary,
+            status = entry.model.status,
+        )
+
+        is DashboardDetectorCardEntry.DangerousApps -> ExportDetectorSummary(
+            title = entry.model.title,
+            headline = entry.model.verdict,
+            summary = entry.model.summary,
+            status = entry.model.status,
+        )
+
+        is DashboardDetectorCardEntry.KernelCheck -> ExportDetectorSummary(
+            title = entry.model.title,
+            headline = entry.model.verdict,
+            summary = entry.model.summary,
+            status = entry.model.status,
+        )
+
+        is DashboardDetectorCardEntry.LSPosed -> ExportDetectorSummary(
+            title = entry.model.title,
+            headline = entry.model.verdict,
+            summary = entry.model.summary,
+            status = entry.model.status,
+        )
+
+        is DashboardDetectorCardEntry.Memory -> ExportDetectorSummary(
+            title = entry.model.title,
+            headline = entry.model.verdict,
+            summary = entry.model.summary,
+            status = entry.model.status,
+        )
+
+        is DashboardDetectorCardEntry.Mount -> ExportDetectorSummary(
+            title = entry.model.title,
+            headline = entry.model.verdict,
+            summary = entry.model.summary,
+            status = entry.model.status,
+        )
+
+        is DashboardDetectorCardEntry.NativeRoot -> ExportDetectorSummary(
+            title = entry.model.title,
+            headline = entry.model.verdict,
+            summary = entry.model.summary,
+            status = entry.model.status,
+        )
+
+        is DashboardDetectorCardEntry.PlayIntegrityFix -> ExportDetectorSummary(
+            title = entry.model.title,
+            headline = entry.model.verdict,
+            summary = entry.model.summary,
+            status = entry.model.status,
+        )
+
+        is DashboardDetectorCardEntry.Selinux -> ExportDetectorSummary(
+            title = entry.model.title,
+            headline = entry.model.verdict,
+            summary = entry.model.summary,
+            status = entry.model.status,
+        )
+
+        is DashboardDetectorCardEntry.Su -> ExportDetectorSummary(
+            title = entry.model.title,
+            headline = entry.model.verdict,
+            summary = entry.model.summary,
+            status = entry.model.status,
+        )
+
+        is DashboardDetectorCardEntry.SystemProperties -> ExportDetectorSummary(
+            title = entry.model.title,
+            headline = entry.model.verdict,
+            summary = entry.model.summary,
+            status = entry.model.status,
+        )
+
+        is DashboardDetectorCardEntry.Tee -> ExportDetectorSummary(
+            title = entry.model.title,
+            headline = entry.model.verdict,
+            summary = entry.model.summary,
+            status = entry.model.status,
+        )
+
+        is DashboardDetectorCardEntry.Virtualization -> ExportDetectorSummary(
+            title = entry.model.title,
+            headline = entry.model.verdict,
+            summary = entry.model.summary,
+            status = entry.model.status,
+        )
+
+        is DashboardDetectorCardEntry.Zygisk -> ExportDetectorSummary(
+            title = entry.model.title,
+            headline = entry.model.verdict,
+            summary = entry.model.summary,
+            status = entry.model.status,
+        )
+    }
 }
 
 private suspend fun saveBitmapToGallery(
