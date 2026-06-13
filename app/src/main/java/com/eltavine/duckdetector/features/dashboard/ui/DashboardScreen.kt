@@ -712,7 +712,11 @@ private suspend fun exportDashboardLongScreenshot(
     val bitmap = withContext(Dispatchers.Main) {
         val host = anchorView.rootView as? ViewGroup
             ?: error("Unable to access root view for export")
-        val width = context.resources.displayMetrics.widthPixels.coerceAtLeast(1)
+        val displayMetrics = context.resources.displayMetrics
+        val screenWidth = displayMetrics.widthPixels.coerceAtLeast(1)
+        val density = displayMetrics.density
+        val contentMaxWidthPx = (720.dp.value * density).roundToInt()
+        val width = minOf(screenWidth, contentMaxWidthPx).coerceAtLeast(1)
         val container = FrameLayout(context).apply {
             alpha = 0f
             layoutParams = ViewGroup.LayoutParams(
