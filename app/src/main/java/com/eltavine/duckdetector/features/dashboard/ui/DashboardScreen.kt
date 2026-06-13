@@ -88,7 +88,6 @@ import com.eltavine.duckdetector.core.ui.components.MetricChip
 import com.eltavine.duckdetector.core.ui.components.StatusBadge
 import com.eltavine.duckdetector.core.ui.components.WrapSafeText
 import com.eltavine.duckdetector.core.ui.components.digitalWatermark
-import com.eltavine.duckdetector.core.ui.model.DetectionSeverity
 import com.eltavine.duckdetector.core.ui.model.MetricChipModel
 import com.eltavine.duckdetector.features.bootloader.ui.card.BootloaderDetectorCard
 import com.eltavine.duckdetector.features.customrom.ui.card.CustomRomDetectorCard
@@ -719,13 +718,6 @@ private suspend fun exportDashboardLongScreenshot(
         val contentMaxWidthPx = (720.dp.value * density).roundToInt()
         val width = minOf(screenWidth, contentMaxWidthPx).coerceAtLeast(1)
 
-        val nonClearCards = uiState.detectorCards.filter {
-            it.status.severity != DetectionSeverity.ALL_CLEAR
-        }
-        val exportUiState = uiState.copy(
-            detectorCards = nonClearCards,
-        )
-
         val container = FrameLayout(context).apply {
             alpha = 0f
             layoutParams = ViewGroup.LayoutParams(
@@ -746,7 +738,7 @@ private suspend fun exportDashboardLongScreenshot(
                 ) {
                     CompositionLocalProvider(
                         LocalDetectorAutoExpansionDirective provides DetectorAutoExpansionDirective(
-                            titles = exportUiState.detectorCards.mapTo(mutableSetOf()) { entry ->
+                            titles = uiState.detectorCards.mapTo(mutableSetOf()) { entry ->
                                 when (entry) {
                                     is DashboardDetectorCardEntry.Bootloader -> entry.model.title
                                     is DashboardDetectorCardEntry.CustomRom -> entry.model.title
@@ -769,7 +761,7 @@ private suspend fun exportDashboardLongScreenshot(
                         ),
                     ) {
                         DashboardScreenContent(
-                            uiState = exportUiState,
+                            uiState = uiState,
                             showTeeDetailsDialog = false,
                             showTeeCertificatesDialog = false,
                             onTeeExpandedChange = {},
@@ -793,14 +785,14 @@ private suspend fun exportDashboardLongScreenshot(
 
         container.addView(composeView)
         host.addView(container)
-        try {
+        val bitmaps = try {
             delay(80L)
             val widthSpec = View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY)
             val heightSpec = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
             composeView.measure(widthSpec, heightSpec)
             val measuredHeight = composeView.measuredHeight.coerceAtLeast(1)
             composeView.layout(0, 0, width, measuredHeight)
-            renderViewToBitmap(
+            renderViewToBitmaps(
                 view = composeView,
                 width = width,
                 height = measuredHeight,
@@ -808,28 +800,66 @@ private suspend fun exportDashboardLongScreenshot(
         } finally {
             host.removeView(container)
         }
+
+        val mergedBitmap = mergeBitmapsVertically(bitmaps)
+        bitmaps.forEach { it.recycle() }
+
+        return try {
+            saveBitmapToGallery(
+                context = context,
+                bitmap = mergedBitmap,
+            )
+        } finally {
+            mergedBitmap.recycle()
+        }
     }
 
-    return try {
-        saveBitmapToGallery(
-            context = context,
-            bitmap = bitmap,
-        )
-    } finally {
-        bitmap.recycle()
-    }
-}
-
-private fun renderViewToBitmap(
+private fun renderViewToBitmaps(
     view: View,
     width: Int,
     height: Int,
-): Bitmap {
-    val bitmapHeight = height.coerceAtMost(MAX_EXPORT_BITMAP_HEIGHT)
-    val bitmap = Bitmap.createBitmap(width, bitmapHeight, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bitmap)
-    view.draw(canvas)
-    return bitmap
+): List<Bitmap> {
+    if (height <= MAX_EXPORT_BITMAP_HEIGHT) {
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        view.draw(canvas)
+        return listOf(bitmap)
+    }
+
+    val bitmaps = mutableListOf<Bitmap>()
+    var remainingHeight = height
+    var offsetY = 0
+
+    while (remainingHeight > 0) {
+        val segmentHeight = minOf(remainingHeight, MAX_EXPORT_BITMAP_HEIGHT)
+        val bitmap = Bitmap.createBitmap(width, segmentHeight, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.translate(0f, -offsetY.toFloat())
+        view.draw(canvas)
+        bitmaps.add(bitmap)
+
+        offsetY += segmentHeight
+        remainingHeight -= segmentHeight
+    }
+
+    return bitmaps
+}
+
+private fun mergeBitmapsVertically(bitmaps: List<Bitmap>): Bitmap {
+    if (bitmaps.size == 1) return bitmaps.first()
+
+    val width = bitmaps.first().width
+    val totalHeight = bitmaps.sumOf { it.height }
+    val merged = Bitmap.createBitmap(width, totalHeight, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(merged)
+    var offsetY = 0
+
+    for (bitmap in bitmaps) {
+        canvas.drawBitmap(bitmap, 0f, offsetY.toFloat(), null)
+        offsetY += bitmap.height
+    }
+
+    return merged
 }
 
 private suspend fun saveBitmapToGallery(
