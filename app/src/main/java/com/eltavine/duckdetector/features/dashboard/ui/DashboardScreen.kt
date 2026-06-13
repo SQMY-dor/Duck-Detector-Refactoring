@@ -800,15 +800,13 @@ private suspend fun exportDashboardLongScreenshot(
         } finally {
             host.removeView(container)
         }
-    }
 
-    return try {
-        saveBitmapToGallery(
+        val uri = saveBitmapToGallery(
             context = context,
             bitmap = bitmap,
         )
-    } finally {
         bitmap.recycle()
+        uri
     }
 }
 
