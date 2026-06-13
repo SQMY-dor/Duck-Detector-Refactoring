@@ -122,6 +122,7 @@ import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 private const val MAX_EXPORT_BITMAP_HEIGHT = 16_384
+private const val EXPORT_JPEG_QUALITY = 90
 private val EXPORT_RELATIVE_DIR = "${Environment.DIRECTORY_PICTURES}/DuckDetector"
 
 @Composable
@@ -864,11 +865,11 @@ private suspend fun saveBitmapToGallery(
 ): Uri = withContext(Dispatchers.IO) {
     val fileName = "duckdetector-scan-${
         SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
-    }.png"
+    }.jpg"
     val resolver = context.contentResolver
     val values = ContentValues().apply {
         put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
-        put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+        put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
         put(MediaStore.Images.Media.RELATIVE_PATH, EXPORT_RELATIVE_DIR)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             put(MediaStore.Images.Media.IS_PENDING, 1)
@@ -878,10 +879,12 @@ private suspend fun saveBitmapToGallery(
     val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
         ?: error("Failed to create MediaStore record")
 
+    val rgbBitmap = bitmap.copy(Bitmap.Config.RGB_565, false)
+
     try {
         resolver.openOutputStream(uri)?.use { output ->
-            if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) {
-                error("PNG compression failed")
+            if (!rgbBitmap.compress(Bitmap.CompressFormat.JPEG, EXPORT_JPEG_QUALITY, output)) {
+                error("JPEG compression failed")
             }
         } ?: error("Failed to open output stream")
 
@@ -895,5 +898,7 @@ private suspend fun saveBitmapToGallery(
     } catch (throwable: Throwable) {
         resolver.delete(uri, null, null)
         throw throwable
+    } finally {
+        rgbBitmap.recycle()
     }
 }
