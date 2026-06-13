@@ -88,6 +88,7 @@ import com.eltavine.duckdetector.core.ui.components.MetricChip
 import com.eltavine.duckdetector.core.ui.components.StatusBadge
 import com.eltavine.duckdetector.core.ui.components.WrapSafeText
 import com.eltavine.duckdetector.core.ui.components.digitalWatermark
+import com.eltavine.duckdetector.core.ui.model.DetectionSeverity
 import com.eltavine.duckdetector.core.ui.model.MetricChipModel
 import com.eltavine.duckdetector.features.bootloader.ui.card.BootloaderDetectorCard
 import com.eltavine.duckdetector.features.customrom.ui.card.CustomRomDetectorCard
@@ -717,6 +718,14 @@ private suspend fun exportDashboardLongScreenshot(
         val density = displayMetrics.density
         val contentMaxWidthPx = (720.dp.value * density).roundToInt()
         val width = minOf(screenWidth, contentMaxWidthPx).coerceAtLeast(1)
+
+        val nonClearCards = uiState.detectorCards.filter {
+            it.status.severity != DetectionSeverity.ALL_CLEAR
+        }
+        val exportUiState = uiState.copy(
+            detectorCards = nonClearCards,
+        )
+
         val container = FrameLayout(context).apply {
             alpha = 0f
             layoutParams = ViewGroup.LayoutParams(
@@ -737,7 +746,7 @@ private suspend fun exportDashboardLongScreenshot(
                 ) {
                     CompositionLocalProvider(
                         LocalDetectorAutoExpansionDirective provides DetectorAutoExpansionDirective(
-                            titles = uiState.detectorCards.mapTo(mutableSetOf()) { entry ->
+                            titles = exportUiState.detectorCards.mapTo(mutableSetOf()) { entry ->
                                 when (entry) {
                                     is DashboardDetectorCardEntry.Bootloader -> entry.model.title
                                     is DashboardDetectorCardEntry.CustomRom -> entry.model.title
@@ -760,7 +769,7 @@ private suspend fun exportDashboardLongScreenshot(
                         ),
                     ) {
                         DashboardScreenContent(
-                            uiState = uiState,
+                            uiState = exportUiState,
                             showTeeDetailsDialog = false,
                             showTeeCertificatesDialog = false,
                             onTeeExpandedChange = {},
