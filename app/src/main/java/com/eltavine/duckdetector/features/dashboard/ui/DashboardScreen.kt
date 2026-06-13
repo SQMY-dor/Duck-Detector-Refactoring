@@ -121,7 +121,6 @@ import java.util.Locale
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
-private const val MAX_EXPORT_BITMAP_HEIGHT = 16_384
 private const val EXPORT_JPEG_QUALITY = 90
 private val EXPORT_RELATIVE_DIR = "${Environment.DIRECTORY_PICTURES}/DuckDetector"
 
@@ -814,49 +813,10 @@ private fun renderViewToBitmap(
     width: Int,
     height: Int,
 ): Bitmap {
-    if (height <= MAX_EXPORT_BITMAP_HEIGHT) {
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        view.draw(canvas)
-        return bitmap
-    }
-
-    val bitmaps = mutableListOf<Bitmap>()
-    var remainingHeight = height
-    var offsetY = 0
-
-    while (remainingHeight > 0) {
-        val segmentHeight = minOf(remainingHeight, MAX_EXPORT_BITMAP_HEIGHT)
-        val bitmap = Bitmap.createBitmap(width, segmentHeight, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        canvas.translate(0f, -offsetY.toFloat())
-        view.draw(canvas)
-        bitmaps.add(bitmap)
-
-        offsetY += segmentHeight
-        remainingHeight -= segmentHeight
-    }
-
-    return mergeBitmapsVertically(bitmaps)
-}
-
-private fun mergeBitmapsVertically(bitmaps: List<Bitmap>): Bitmap {
-    if (bitmaps.size == 1) return bitmaps.first()
-
-    val width = bitmaps.first().width
-    val totalHeight = bitmaps.sumOf { it.height }
-    val merged = Bitmap.createBitmap(width, totalHeight, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(merged)
-    var offsetY = 0
-
-    for (bitmap in bitmaps) {
-        canvas.drawBitmap(bitmap, 0f, offsetY.toFloat(), null)
-        offsetY += bitmap.height
-    }
-
-    bitmaps.forEach { it.recycle() }
-
-    return merged
+    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    view.draw(canvas)
+    return bitmap
 }
 
 private suspend fun saveBitmapToGallery(
