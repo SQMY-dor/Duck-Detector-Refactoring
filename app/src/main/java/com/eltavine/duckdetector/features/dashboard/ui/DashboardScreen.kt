@@ -752,6 +752,7 @@ private suspend fun exportDashboardLongScreenshot(
                                     is DashboardDetectorCardEntry.Zygisk -> entry.model.title
                                 }
                             },
+                            disableAnimation = true,
                         ),
                     ) {
                         DashboardScreenContent(
