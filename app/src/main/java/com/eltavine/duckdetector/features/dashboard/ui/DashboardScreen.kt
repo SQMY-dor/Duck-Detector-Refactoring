@@ -18,6 +18,7 @@ package com.eltavine.duckdetector.features.dashboard.ui
 
 import android.content.ContentValues
 import android.content.Context
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.net.Uri
@@ -125,6 +126,8 @@ import kotlin.math.sqrt
 
 private const val EXPORT_JPEG_QUALITY = 90
 private const val MAX_EXPORT_BITMAP_HEIGHT = 16_384
+// ~100 MB in ARGB_8888 pixels; well under most devices' per-app memory ceiling.
+private const val MAX_EXPORT_BITMAP_BYTES = 100 * 1024 * 1024L
 private val EXPORT_RELATIVE_DIR = "${Environment.DIRECTORY_PICTURES}/DuckDetector"
 
 @Composable
@@ -731,37 +734,41 @@ private suspend fun exportDashboardLongScreenshot(
     return withContext(Dispatchers.Main) {
         val host = anchorView.rootView as? ViewGroup
             ?: error("Unable to access root view for export")
-        val displayMetrics = context.resources.displayMetrics
+
+        // Render at 1x density so all dp-based sizes collapse to the minimum pixel
+        // count. This drastically reduces the bitmap footprint (the full-height
+        // content is typically 70k+ px at 3x, but ~23k px at 1x), allowing a single
+        // JPEG encode to succeed while keeping every detail sharp enough for sharing.
+        val exportDensity = 1f
+        val exportContext = context.createConfigurationContext(
+            Configuration(context.resources.configuration).apply {
+                densityDpi = (exportDensity * 160).toInt()
+            },
+        )
+        val displayMetrics = exportContext.resources.displayMetrics
         val screenWidth = displayMetrics.widthPixels.coerceAtLeast(1)
-        val density = displayMetrics.density
-        val contentMaxWidthPx = (720.dp.value * density).roundToInt()
+        val contentMaxWidthPx = (720.dp.value * exportDensity).roundToInt()
         val width = minOf(screenWidth, contentMaxWidthPx).coerceAtLeast(1)
 
         // Only auto-expand cards that actually carry a problem (DANGER/WARNING).
         // Clean cards (INFO/ALL_CLEAR) stay collapsed so the long screenshot keeps
         // a manageable height while still surfacing every detector's verdict.
-        // The card's own title is the key the directive matches against.
-        val problemCards: List<Pair<String, DetectionSeverity>> = uiState.detectorCards
-            .mapNotNull { entry ->
+        val expandedTitles: Set<String> = uiState.detectorCards
+            .filter { entry ->
                 val severity = entry.status.severity
-                if (severity == DetectionSeverity.DANGER ||
+                severity == DetectionSeverity.DANGER ||
                     severity == DetectionSeverity.WARNING
-                ) {
-                    detectorCardTitle(entry) to severity
-                } else {
-                    null
-                }
             }
-        val expandedTitles = mutableStateOf(problemCards.map { it.first }.toSet())
+            .mapTo(mutableSetOf()) { entry -> detectorCardTitle(entry) }
 
-        val container = FrameLayout(context).apply {
+        val container = FrameLayout(exportContext).apply {
             alpha = 0f
             layoutParams = ViewGroup.LayoutParams(
                 width,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             )
         }
-        val composeView = ComposeView(context).apply {
+        val composeView = ComposeView(exportContext).apply {
             layoutParams = FrameLayout.LayoutParams(
                 width,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -774,7 +781,7 @@ private suspend fun exportDashboardLongScreenshot(
                 ) {
                     CompositionLocalProvider(
                         LocalDetectorAutoExpansionDirective provides DetectorAutoExpansionDirective(
-                            titles = expandedTitles.value,
+                            titles = expandedTitles,
                             disableAnimation = true,
                         ),
                     ) {
@@ -803,42 +810,12 @@ private suspend fun exportDashboardLongScreenshot(
 
         container.addView(composeView)
         host.addView(container)
-        val bitmap = try {
+        val rawBitmap = try {
             delay(80L)
             val widthSpec = View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY)
             val heightSpec = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
-
-            // Safety backstop: even with only problem cards expanded, an extreme device
-            // (e.g. hundreds of flagged apps) can still exceed what the JPEG encoder or a
-            // single ARGB_8888 bitmap can handle. Fold expanded cards one at a time,
-            // evicting WARNING before DANGER so the most severe findings stay visible,
-            // until the height fits.
             composeView.measure(widthSpec, heightSpec)
-            var measuredHeight = composeView.measuredHeight.coerceAtLeast(1)
-            var foldedCount = 0
-            val foldingQueue: List<String> = problemCards
-                .sortedBy { (_, severity) ->
-                    // WARNING (0) sorts first -> evicted first; DANGER (1) last -> kept longest.
-                    if (severity == DetectionSeverity.DANGER) 1 else 0
-                }
-                .map { it.first }
-            while (measuredHeight > MAX_EXPORT_BITMAP_HEIGHT && expandedTitles.value.isNotEmpty()) {
-                val nextTitle = foldingQueue.firstOrNull { it in expandedTitles.value }
-                if (nextTitle == null) break
-                expandedTitles.value = expandedTitles.value - nextTitle
-                delay(40L)
-                composeView.measure(widthSpec, heightSpec)
-                measuredHeight = composeView.measuredHeight.coerceAtLeast(1)
-                foldedCount++
-            }
-            if (foldedCount > 0) {
-                Log.d(
-                    "DuckExport",
-                    "height backstop folded $foldedCount card(s); " +
-                        "final height=${measuredHeight}, expanded=${expandedTitles.value.size}",
-                )
-            }
-
+            val measuredHeight = composeView.measuredHeight.coerceAtLeast(1)
             composeView.layout(0, 0, width, measuredHeight)
             renderViewToBitmap(
                 view = composeView,
@@ -847,6 +824,29 @@ private suspend fun exportDashboardLongScreenshot(
             )
         } finally {
             host.removeView(container)
+        }
+
+        // Post-render safety clamp: even at 1x, an extreme device (hundreds of
+        // flagged apps) can still produce a bitmap too large for the JPEG encoder.
+        // Scale down the long axis so both dimensions fit within hardware limits.
+        val bitmap = if (rawBitmap.height > MAX_EXPORT_BITMAP_HEIGHT ||
+            rawBitmap.byteCount > MAX_EXPORT_BITMAP_BYTES
+        ) {
+            val scale = minOf(
+                MAX_EXPORT_BITMAP_HEIGHT.toFloat() / rawBitmap.height,
+                (MAX_EXPORT_BITMAP_BYTES.toFloat() / rawBitmap.byteCount).coerceAtMost(1f),
+            )
+            val scaledWidth = (rawBitmap.width * scale).roundToInt().coerceAtLeast(1)
+            val scaledHeight = (rawBitmap.height * scale).roundToInt().coerceAtLeast(1)
+            Log.d(
+                "DuckExport",
+                "scaling bitmap ${rawBitmap.width}x${rawBitmap.height} -> " +
+                    "${scaledWidth}x${scaledHeight} (scale=${"%.2f".format(scale)})",
+            )
+            Bitmap.createScaledBitmap(rawBitmap, scaledWidth, scaledHeight, true)
+                .also { rawBitmap.recycle() }
+        } else {
+            rawBitmap
         }
 
         val uri = saveBitmapToGallery(
