@@ -24,6 +24,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -816,6 +817,13 @@ private fun renderViewToBitmap(
     val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
     view.draw(canvas)
+    Log.d(
+        "DuckExport",
+        "rendered bitmap: ${bitmap.width}x${bitmap.height}, " +
+            "byteCount=${bitmap.byteCount}, " +
+            "allocationByteCount=${bitmap.allocationByteCount}, " +
+            "config=${bitmap.config}",
+    )
     return bitmap
 }
 
@@ -841,7 +849,14 @@ private suspend fun saveBitmapToGallery(
 
     try {
         resolver.openOutputStream(uri)?.use { output ->
-            if (!bitmap.compress(Bitmap.CompressFormat.JPEG, EXPORT_JPEG_QUALITY, output)) {
+            val compressed = bitmap.compress(Bitmap.CompressFormat.JPEG, EXPORT_JPEG_QUALITY, output)
+            Log.d(
+                "DuckExport",
+                "compress JPEG q$EXPORT_JPEG_QUALITY: result=$compressed, " +
+                    "src=${bitmap.width}x${bitmap.height} (${bitmap.byteCount}B), " +
+                    "isRecycled=${bitmap.isRecycled}",
+            )
+            if (!compressed) {
                 error("JPEG compression failed")
             }
         } ?: error("Failed to open output stream")
