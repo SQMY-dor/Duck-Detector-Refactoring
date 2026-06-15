@@ -89,6 +89,7 @@ import com.eltavine.duckdetector.core.ui.components.MetricChip
 import com.eltavine.duckdetector.core.ui.components.StatusBadge
 import com.eltavine.duckdetector.core.ui.components.WrapSafeText
 import com.eltavine.duckdetector.core.ui.components.digitalWatermark
+import com.eltavine.duckdetector.core.ui.model.DetectionSeverity
 import com.eltavine.duckdetector.core.ui.model.MetricChipModel
 import com.eltavine.duckdetector.features.bootloader.ui.card.BootloaderDetectorCard
 import com.eltavine.duckdetector.features.customrom.ui.card.CustomRomDetectorCard
@@ -123,6 +124,7 @@ import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 private const val EXPORT_JPEG_QUALITY = 90
+private const val MAX_EXPORT_BITMAP_HEIGHT = 16_384
 private val EXPORT_RELATIVE_DIR = "${Environment.DIRECTORY_PICTURES}/DuckDetector"
 
 @Composable
@@ -551,6 +553,24 @@ private fun DashboardDeviceInfoCard(
     }
 }
 
+private fun detectorCardTitle(entry: DashboardDetectorCardEntry): String = when (entry) {
+    is DashboardDetectorCardEntry.Bootloader -> entry.model.title
+    is DashboardDetectorCardEntry.CustomRom -> entry.model.title
+    is DashboardDetectorCardEntry.DangerousApps -> entry.model.title
+    is DashboardDetectorCardEntry.KernelCheck -> entry.model.title
+    is DashboardDetectorCardEntry.LSPosed -> entry.model.title
+    is DashboardDetectorCardEntry.Memory -> entry.model.title
+    is DashboardDetectorCardEntry.Mount -> entry.model.title
+    is DashboardDetectorCardEntry.NativeRoot -> entry.model.title
+    is DashboardDetectorCardEntry.PlayIntegrityFix -> entry.model.title
+    is DashboardDetectorCardEntry.Selinux -> entry.model.title
+    is DashboardDetectorCardEntry.Su -> entry.model.title
+    is DashboardDetectorCardEntry.SystemProperties -> entry.model.title
+    is DashboardDetectorCardEntry.Tee -> entry.model.title
+    is DashboardDetectorCardEntry.Virtualization -> entry.model.title
+    is DashboardDetectorCardEntry.Zygisk -> entry.model.title
+}
+
 @Composable
 private fun DashboardDetectorCard(
     entry: DashboardDetectorCardEntry,
@@ -717,6 +737,23 @@ private suspend fun exportDashboardLongScreenshot(
         val contentMaxWidthPx = (720.dp.value * density).roundToInt()
         val width = minOf(screenWidth, contentMaxWidthPx).coerceAtLeast(1)
 
+        // Only auto-expand cards that actually carry a problem (DANGER/WARNING).
+        // Clean cards (INFO/ALL_CLEAR) stay collapsed so the long screenshot keeps
+        // a manageable height while still surfacing every detector's verdict.
+        // The card's own title is the key the directive matches against.
+        val problemCards: List<Pair<String, DetectionSeverity>> = uiState.detectorCards
+            .mapNotNull { entry ->
+                val severity = entry.status.severity
+                if (severity == DetectionSeverity.DANGER ||
+                    severity == DetectionSeverity.WARNING
+                ) {
+                    detectorCardTitle(entry) to severity
+                } else {
+                    null
+                }
+            }
+        val expandedTitles = mutableStateOf(problemCards.map { it.first }.toSet())
+
         val container = FrameLayout(context).apply {
             alpha = 0f
             layoutParams = ViewGroup.LayoutParams(
@@ -737,25 +774,7 @@ private suspend fun exportDashboardLongScreenshot(
                 ) {
                     CompositionLocalProvider(
                         LocalDetectorAutoExpansionDirective provides DetectorAutoExpansionDirective(
-                            titles = uiState.detectorCards.mapTo(mutableSetOf()) { entry ->
-                                when (entry) {
-                                    is DashboardDetectorCardEntry.Bootloader -> entry.model.title
-                                    is DashboardDetectorCardEntry.CustomRom -> entry.model.title
-                                    is DashboardDetectorCardEntry.DangerousApps -> entry.model.title
-                                    is DashboardDetectorCardEntry.KernelCheck -> entry.model.title
-                                    is DashboardDetectorCardEntry.LSPosed -> entry.model.title
-                                    is DashboardDetectorCardEntry.Memory -> entry.model.title
-                                    is DashboardDetectorCardEntry.Mount -> entry.model.title
-                                    is DashboardDetectorCardEntry.NativeRoot -> entry.model.title
-                                    is DashboardDetectorCardEntry.PlayIntegrityFix -> entry.model.title
-                                    is DashboardDetectorCardEntry.Selinux -> entry.model.title
-                                    is DashboardDetectorCardEntry.Su -> entry.model.title
-                                    is DashboardDetectorCardEntry.SystemProperties -> entry.model.title
-                                    is DashboardDetectorCardEntry.Tee -> entry.model.title
-                                    is DashboardDetectorCardEntry.Virtualization -> entry.model.title
-                                    is DashboardDetectorCardEntry.Zygisk -> entry.model.title
-                                }
-                            },
+                            titles = expandedTitles.value,
                             disableAnimation = true,
                         ),
                     ) {
@@ -788,8 +807,38 @@ private suspend fun exportDashboardLongScreenshot(
             delay(80L)
             val widthSpec = View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY)
             val heightSpec = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+
+            // Safety backstop: even with only problem cards expanded, an extreme device
+            // (e.g. hundreds of flagged apps) can still exceed what the JPEG encoder or a
+            // single ARGB_8888 bitmap can handle. Fold expanded cards one at a time,
+            // evicting WARNING before DANGER so the most severe findings stay visible,
+            // until the height fits.
             composeView.measure(widthSpec, heightSpec)
-            val measuredHeight = composeView.measuredHeight.coerceAtLeast(1)
+            var measuredHeight = composeView.measuredHeight.coerceAtLeast(1)
+            var foldedCount = 0
+            val foldingQueue: List<String> = problemCards
+                .sortedBy { (_, severity) ->
+                    // WARNING (0) sorts first -> evicted first; DANGER (1) last -> kept longest.
+                    if (severity == DetectionSeverity.DANGER) 1 else 0
+                }
+                .map { it.first }
+            while (measuredHeight > MAX_EXPORT_BITMAP_HEIGHT && expandedTitles.value.isNotEmpty()) {
+                val nextTitle = foldingQueue.firstOrNull { it in expandedTitles.value }
+                if (nextTitle == null) break
+                expandedTitles.value = expandedTitles.value - nextTitle
+                delay(40L)
+                composeView.measure(widthSpec, heightSpec)
+                measuredHeight = composeView.measuredHeight.coerceAtLeast(1)
+                foldedCount++
+            }
+            if (foldedCount > 0) {
+                Log.d(
+                    "DuckExport",
+                    "height backstop folded $foldedCount card(s); " +
+                        "final height=${measuredHeight}, expanded=${expandedTitles.value.size}",
+                )
+            }
+
             composeView.layout(0, 0, width, measuredHeight)
             renderViewToBitmap(
                 view = composeView,
