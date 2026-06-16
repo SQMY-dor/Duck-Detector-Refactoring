@@ -30,7 +30,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.Toast
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -73,23 +72,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.drawscope.rotate
-import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import com.eltavine.duckdetector.core.ui.components.DetectorAutoExpansionDirective
 import com.eltavine.duckdetector.core.ui.components.LocalDetectorAutoExpansionDirective
 import com.eltavine.duckdetector.core.ui.components.MetricChip
 import com.eltavine.duckdetector.core.ui.components.StatusBadge
 import com.eltavine.duckdetector.core.ui.components.WrapSafeText
-import com.eltavine.duckdetector.core.ui.components.digitalWatermark
+import com.eltavine.duckdetector.core.ui.components.embedDigitalWatermark
 import com.eltavine.duckdetector.core.ui.model.DetectionSeverity
 import com.eltavine.duckdetector.core.ui.model.MetricChipModel
 import com.eltavine.duckdetector.features.bootloader.ui.card.BootloaderDetectorCard
@@ -118,16 +112,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
-import kotlin.math.sqrt
 
 private const val EXPORT_JPEG_QUALITY = 90
+private const val MIN_EXPORT_JPEG_QUALITY = 55
 private const val MAX_EXPORT_BITMAP_HEIGHT = 16_384
 // ~100 MB in ARGB_8888 pixels; well under most devices' per-app memory ceiling.
 private const val MAX_EXPORT_BITMAP_BYTES = 100 * 1024 * 1024L
+private const val MAX_EXPORT_FILE_BYTES = 1_572_864
 private val EXPORT_RELATIVE_DIR = "${Environment.DIRECTORY_PICTURES}/DuckDetector"
 
 @Composable
@@ -158,7 +154,6 @@ fun DashboardScreen(
         modifier = modifier.fillMaxSize(),
         scrollable = true,
         includeSystemBarsPadding = true,
-        includeVisibleWatermark = false,
         showExportButton = true,
         exporting = exporting,
         onExportClick = {
@@ -206,7 +201,6 @@ private fun DashboardScreenContent(
     modifier: Modifier = Modifier,
     scrollable: Boolean,
     includeSystemBarsPadding: Boolean,
-    includeVisibleWatermark: Boolean,
     showExportButton: Boolean,
     exporting: Boolean,
     onExportClick: () -> Unit,
@@ -216,7 +210,6 @@ private fun DashboardScreenContent(
     Box(
         modifier = modifier
             .background(MaterialTheme.colorScheme.background)
-            .digitalWatermark(uiState.deviceInfoCard),
     ) {
         val contentModifier = Modifier
             .align(Alignment.TopCenter)
@@ -266,13 +259,6 @@ private fun DashboardScreenContent(
                 Spacer(modifier = Modifier.height(96.dp))
             }
         }
-
-        if (includeVisibleWatermark) {
-            ExportDeviceInfoWatermarkOverlay(
-                deviceInfoCard = uiState.deviceInfoCard,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
     }
 }
 
@@ -303,7 +289,7 @@ private fun DashboardHeaderCard(
                 text = if (isLoading) {
                     "Detector cards are still collecting local evidence. Export captures the current state as a long screenshot."
                 } else {
-                    "Export the current dashboard as a long screenshot with a visible device watermark and embedded device fingerprint."
+                    "Export the current dashboard as a long screenshot with an embedded device watermark."
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -546,7 +532,7 @@ private fun DashboardDeviceInfoCard(
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 WrapSafeText(
-                    text = "The export adds a transparent visible watermark derived from this section and keeps the existing invisible device watermark in the bitmap data.",
+                    text = "The export embeds a device watermark derived from this section into the output image.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -615,114 +601,6 @@ private fun DashboardDetectorCard(
         is DashboardDetectorCardEntry.Virtualization -> VirtualizationDetectorCard(model = entry.model)
         is DashboardDetectorCardEntry.Zygisk -> ZygiskDetectorCard(model = entry.model)
     }
-}
-
-@Composable
-private fun ExportDeviceInfoWatermarkOverlay(
-    deviceInfoCard: DeviceInfoCardModel,
-    modifier: Modifier = Modifier,
-    alpha: Float = 0.085f,
-    textSizeSp: Float = 12f,
-    spacingDp: Float = 220f,
-    rotationDegrees: Float = -25f,
-) {
-    val density = LocalDensity.current
-    val isDarkTheme = isSystemInDarkTheme()
-    val textSizePx = with(density) { textSizeSp.sp.toPx() }
-    val spacingPx = with(density) { spacingDp.dp.toPx() }
-    val watermarkLines = remember(deviceInfoCard) {
-        buildVisibleWatermarkLines(deviceInfoCard)
-    }
-
-    Canvas(modifier = modifier) {
-        val colorValue = if (isDarkTheme) 255 else 0
-        val paint = android.graphics.Paint().apply {
-            color = android.graphics.Color.argb(
-                (alpha * 255f).roundToInt(),
-                colorValue,
-                colorValue,
-                colorValue,
-            )
-            textSize = textSizePx
-            isAntiAlias = true
-            typeface = android.graphics.Typeface.MONOSPACE
-        }
-
-        val lineHeight = paint.fontSpacing
-        val widestLine = watermarkLines.maxOfOrNull(paint::measureText) ?: 0f
-        val safeHSpacing = maxOf(spacingPx, widestLine * 1.12f)
-        val safeVSpacing = maxOf(spacingPx * 0.48f, lineHeight * (watermarkLines.size + 1.2f))
-        val diagonal = sqrt(size.width * size.width + size.height * size.height)
-        val startX = -diagonal / 2f
-        val endX = size.width + diagonal / 2f
-        val endY = size.height + diagonal / 2f
-
-        rotate(
-            degrees = rotationDegrees,
-            pivot = Offset(size.width / 2f, size.height / 2f),
-        ) {
-            var y = -diagonal / 2f + lineHeight
-            while (y < endY) {
-                var x = startX
-                while (x < endX) {
-                    watermarkLines.forEachIndexed { index, line ->
-                        drawContext.canvas.nativeCanvas.drawText(
-                            line,
-                            x,
-                            y + index * lineHeight,
-                            paint,
-                        )
-                    }
-                    x += safeHSpacing
-                }
-                y += safeVSpacing
-            }
-        }
-    }
-}
-
-private fun buildVisibleWatermarkLines(
-    deviceInfoCard: DeviceInfoCardModel,
-): List<String> {
-    val facts = mutableMapOf<String, String>()
-    deviceInfoCard.headerFacts.forEach { fact ->
-        facts[fact.label] = fact.value
-    }
-    deviceInfoCard.sections.forEach { section ->
-        section.rows.forEach { row ->
-            facts[row.label] = row.value
-        }
-    }
-
-    val brand = facts["Brand"].orFallback()
-    val model = facts["Model"].orFallback()
-    val device = facts["Device"].orFallback()
-    val release = facts["Release"].orFallback()
-    val sdk = facts["SDK"].orFallback()
-    val securityPatch = facts["Security patch"].orFallback()
-    val fingerprint = truncateMiddle(facts["Fingerprint"].orFallback(), 44)
-
-    return listOf(
-        "Duck Detector export",
-        "Brand $brand | Model $model | Device $device",
-        "Android $release | SDK $sdk | Patch $securityPatch",
-        "Fingerprint $fingerprint",
-    )
-}
-
-private fun String?.orFallback(): String {
-    return this?.takeIf { it.isNotBlank() && it != "Unavailable" } ?: "Unknown"
-}
-
-private fun truncateMiddle(
-    value: String,
-    maxLength: Int,
-): String {
-    if (value.length <= maxLength) {
-        return value
-    }
-    val edge = ((maxLength - 1) / 2).coerceAtLeast(4)
-    return "${value.take(edge)}…${value.takeLast(edge)}"
 }
 
 private suspend fun exportDashboardLongScreenshot(
@@ -798,7 +676,6 @@ private suspend fun exportDashboardLongScreenshot(
                                 .wrapContentHeight(),
                             scrollable = false,
                             includeSystemBarsPadding = false,
-                            includeVisibleWatermark = true,
                             showExportButton = false,
                             exporting = false,
                             onExportClick = {},
@@ -848,6 +725,10 @@ private suspend fun exportDashboardLongScreenshot(
         } else {
             rawBitmap
         }
+        embedDigitalWatermark(
+            bitmap = bitmap,
+            deviceInfoCard = uiState.deviceInfoCard,
+        )
 
         val uri = saveBitmapToGallery(
             context = context,
@@ -897,17 +778,16 @@ private suspend fun saveBitmapToGallery(
         ?: error("Failed to create MediaStore record")
 
     try {
+        val encodedBytes = encodeBitmapForExport(bitmap)
         resolver.openOutputStream(uri)?.use { output ->
-            val compressed = bitmap.compress(Bitmap.CompressFormat.JPEG, EXPORT_JPEG_QUALITY, output)
             Log.d(
                 "DuckExport",
-                "compress JPEG q$EXPORT_JPEG_QUALITY: result=$compressed, " +
+                "write JPEG bytes=${encodedBytes.size}, " +
                     "src=${bitmap.width}x${bitmap.height} (${bitmap.byteCount}B), " +
                     "isRecycled=${bitmap.isRecycled}",
             )
-            if (!compressed) {
-                error("JPEG compression failed")
-            }
+            output.write(encodedBytes)
+            output.flush()
         } ?: error("Failed to open output stream")
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -921,4 +801,63 @@ private suspend fun saveBitmapToGallery(
         resolver.delete(uri, null, null)
         throw throwable
     }
+}
+
+private fun encodeBitmapForExport(bitmap: Bitmap): ByteArray {
+    var workingBitmap = bitmap
+
+    while (true) {
+        val encoded = compressBitmapToTargetSize(workingBitmap)
+        if (encoded != null) {
+            if (workingBitmap !== bitmap) {
+                workingBitmap.recycle()
+            }
+            return encoded
+        }
+
+        val nextWidth = (workingBitmap.width * 0.9f).roundToInt().coerceAtLeast(1)
+        val nextHeight = (workingBitmap.height * 0.9f).roundToInt().coerceAtLeast(1)
+        if (nextWidth == workingBitmap.width && nextHeight == workingBitmap.height) {
+            break
+        }
+
+        val scaledBitmap = Bitmap.createScaledBitmap(workingBitmap, nextWidth, nextHeight, true)
+        Log.d(
+            "DuckExport",
+            "retry export with scaled bitmap ${workingBitmap.width}x${workingBitmap.height} -> " +
+                "${scaledBitmap.width}x${scaledBitmap.height}",
+        )
+        if (workingBitmap !== bitmap) {
+            workingBitmap.recycle()
+        }
+        workingBitmap = scaledBitmap
+    }
+
+    if (workingBitmap !== bitmap) {
+        workingBitmap.recycle()
+    }
+    error("Unable to compress export below ${MAX_EXPORT_FILE_BYTES / 1024} KiB")
+}
+
+private fun compressBitmapToTargetSize(bitmap: Bitmap): ByteArray? {
+    val stream = ByteArrayOutputStream()
+
+    for (quality in EXPORT_JPEG_QUALITY downTo MIN_EXPORT_JPEG_QUALITY step 5) {
+        stream.reset()
+        val compressed = bitmap.compress(Bitmap.CompressFormat.JPEG, quality, stream)
+        if (!compressed) {
+            error("JPEG compression failed")
+        }
+
+        val encodedBytes = stream.toByteArray()
+        Log.d(
+            "DuckExport",
+            "try JPEG q$quality => ${encodedBytes.size} bytes for ${bitmap.width}x${bitmap.height}",
+        )
+        if (encodedBytes.size <= MAX_EXPORT_FILE_BYTES) {
+            return encodedBytes
+        }
+    }
+
+    return null
 }

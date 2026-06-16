@@ -17,6 +17,7 @@
 package com.eltavine.duckdetector.core.ui.components
 
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -83,6 +84,26 @@ fun Modifier.digitalWatermark(
                     )
                 }
             }
+    }
+}
+
+/** Writes the digital watermark directly into an exported bitmap. */
+fun embedDigitalWatermark(
+    bitmap: Bitmap,
+    deviceInfoCard: DeviceInfoCardModel,
+) {
+    if (bitmap.width < BLOCK_SIZE * 2 || bitmap.height < BLOCK_SIZE * 2) {
+        return
+    }
+    val watermarkBitmap = buildWatermarkBitmap(bitmap.width, bitmap.height, deviceInfoCard)
+    try {
+        val canvas = Canvas(bitmap)
+        val paint = android.graphics.Paint().apply {
+            blendMode = android.graphics.BlendMode.PLUS
+        }
+        canvas.drawBitmap(watermarkBitmap, 0f, 0f, paint)
+    } finally {
+        watermarkBitmap.recycle()
     }
 }
 
